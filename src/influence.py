@@ -10,6 +10,7 @@ class IFEngine(object):
         self.time_dict=defaultdict(list)
         self.hvp_dict=defaultdict(list)
         self.IF_dict=defaultdict(list)
+        self.influences=defaultdict(dict)
 
     def preprocess_gradients(self, tr_grad_dict, val_grad_dict, noise_index):
         self.tr_grad_dict = tr_grad_dict
@@ -58,8 +59,8 @@ class IFEngine(object):
                 C_tmp = torch.sum(self.val_grad_avg_dict[weight_name] * tmp_grad) / (lambda_const + torch.sum(tmp_grad**2))
                 hvp += (self.val_grad_avg_dict[weight_name] - C_tmp*tmp_grad) / (self.n_train*lambda_const)
             hvp_proposed_dict[weight_name] = hvp 
-        self.hvp_dict['proposed'] = hvp_proposed_dict
-        self.time_dict['proposed'] = time()-start_time
+        self.hvp_dict['DataInf'] = hvp_proposed_dict
+        self.time_dict['DataInf'] = time()-start_time
 
     def compute_hvp_accurate(self, lambda_const_param=10):
         start_time = time()
@@ -122,7 +123,23 @@ class IFEngine(object):
                     if_tmp_value += torch.sum(self.hvp_dict[method_name][weight_name]*self.tr_grad_dict[tr_id][weight_name])
                 if_tmp_dict[tr_id]= -if_tmp_value 
                 
-            self.IF_dict[method_name] = pd.Series(if_tmp_dict, dtype=float).to_numpy()    
+            self.IF_dict[method_name] = pd.Series(if_tmp_dict, dtype=float).to_numpy()
+
+    def compute_all_influences(self):
+        for method_name in self.hvp_dict:
+            if_tmp_dict = {}
+            module_influences = defaultdict(dict)
+            for tr_id in self.tr_grad_dict:
+                if_tmp_value = 0
+                for weight_name in self.val_grad_avg_dict:
+                    layer_influence = torch.sum(self.hvp_dict[method_name][weight_name]*self.tr_grad_dict[tr_id][weight_name])
+                    module_influences[weight_name][tr_id] = layer_influence
+                    if_tmp_value += layer_influence
+                if_tmp_dict[tr_id]= -if_tmp_value 
+                
+            self.influences[method_name] = {layer_name:pd.Series(influences, dtype=float).to_numpy() for layer_name, influences in module_influences.items() }
+            self.IF_dict[method_name] = pd.Series(if_tmp_dict, dtype=float).to_numpy()
+            self.influences[method_name][''] = self.IF_dict[method_name]
 
     def save_result(self, noise_index, run_id=0):
         results={}
@@ -132,6 +149,9 @@ class IFEngine(object):
 
         with open(f"./results_{run_id}.pkl",'wb') as file:
             pickle.dump(results, file)
+
+    def get_metrics(self):
+        return {"runtime": self.time_dict, "influences": self.influences}
 
 class IFEngineGeneration(object):
     '''
@@ -177,8 +197,8 @@ class IFEngineGeneration(object):
                     C_tmp = torch.sum(self.val_grad_dict[val_id][weight_name] * tmp_grad) / (lambda_const + torch.sum(tmp_grad**2))
                     hvp += (self.val_grad_dict[val_id][weight_name] - C_tmp*tmp_grad) / (self.n_train*lambda_const)
                 hvp_proposed_dict[val_id][weight_name] = hvp
-        self.hvp_dict['proposed'] = hvp_proposed_dict
-        self.time_dict['proposed'] = time()-start_time
+        self.hvp_dict['DataInf'] = hvp_proposed_dict
+        self.time_dict['DataInf'] = time()-start_time
 
     def compute_IF(self):
         for method_name in self.hvp_dict:

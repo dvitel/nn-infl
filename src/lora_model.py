@@ -74,6 +74,7 @@ class LORAEngine(object):
         )
 
         self.model.to(self.device)
+        eval_metrics = []
         for epoch in range(self.num_epochs):
             self.model.train()
             for step, batch in enumerate(tqdm(self.train_dataloader)):
@@ -99,7 +100,8 @@ class LORAEngine(object):
 
             eval_metric = metric.compute()
             print(f"Epoch {(epoch+1)}:", eval_metric)
-
+            eval_metrics.append(eval_metric)
+        return eval_metrics
 
     def compute_gradient(self, tokenized_datasets, collate_fn):
         train_dataloader_stochastic = DataLoader(tokenized_datasets["train"], 

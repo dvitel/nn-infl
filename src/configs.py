@@ -11,7 +11,7 @@ def generate_config(expno_name='mrpc',
     '''
     
     # Experiment configuration
-    exp = _setup_env()
+    exp = dict() #_setup_env()
     exp['expno']=expno_name
     exp['n_runs']=n_runs
 
@@ -23,7 +23,7 @@ def generate_config(expno_name='mrpc',
     run_temp['device'] = "cuda"
     run_temp['lr'] = 3e-4
     
-    run_temp['model_name_or_path'] = "roberta-large"
+    run_temp['model_name_or_path'] = "distilbert/distilroberta-base" #"roberta-large"
     run_temp['batch_size'] = 32
     run_temp['num_epochs'] = 10
     run_temp['target_modules'] = ["value"]
