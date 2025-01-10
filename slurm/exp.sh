@@ -16,7 +16,7 @@ task=${tasks[$SLURM_ARRAY_TASK_ID]}
 
 for run_id in {0..19}; do
     echo "Starting run $task $run_id"
-    srun python ~/infl/exp.py infl --run-id=$run_id --task=$task --model=roberta-large --num-epochs=10 --cwd=/data/dvitel/infl
+    srun python ~/infl/src/exp.py infl --run-id=$run_id --task=$task --model=roberta-large --num-epochs=10 --cwd=/data/dvitel/infl
     echo "Done run $task $run_id"
 done
 
