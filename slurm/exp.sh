@@ -1,7 +1,6 @@
 #!/bin/bash -l
-#SBATCH --job-name=influence
-#SBATCH -o infl-exp.out
-#SBATCH -e infl-exp.err
+#SBATCH --job-name=infl
+#SBATCH --output infl-%j.out
 #SBATCH -D /data/dvitel/infl
 #SBATCH -p Quick # run on partition general
 #SBATCH --open-mode=append
