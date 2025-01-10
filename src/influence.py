@@ -140,6 +140,7 @@ class IFEngine(object):
             self.influences[method_name] = {layer_name:pd.Series(influences, dtype=float).to_numpy() for layer_name, influences in module_influences.items() }
             self.IF_dict[method_name] = pd.Series(if_tmp_dict, dtype=float).to_numpy()
             self.influences[method_name][''] = self.IF_dict[method_name]
+        return {"runtime": self.time_dict, "influences": self.influences}
 
     def save_result(self, noise_index, run_id=0):
         results={}

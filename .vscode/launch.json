@@ -28,8 +28,11 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "infl", "--run-id=0", "--task=qnli", "--model=distilbert/distilroberta-base", "--num-epochs=3"
-            ]
+                "filter", "--run-id=0", "--task=qnli", "--num-epochs=3"
+            ],
+            "env": {
+                "CUDA_LAUNCH_BLOCKING": "1"
+            }
         }
     ]
 }
