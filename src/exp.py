@@ -43,43 +43,42 @@ def flip_label(example, ind, noise_index):
         example["noise"] = False
     return example
 
-def select_shuffled_balanced(dataset, total_size, num_groups = 1):
-    possible_labels = len(dataset.features['label'].names)
-    num_samples_per_class_per_group = total_size // possible_labels
-    num_samples_per_class = num_groups * num_samples_per_class_per_group
-    labels = np.array(dataset['label'])
-    all_indices = [[] for _ in range(num_groups)]
-    for i in range(possible_labels):
-        class_0_indices = np.where(labels == i)[0]
-        sampled_class_0_indices = np.random.choice(class_0_indices, num_samples_per_class, replace=False)
-        for i, g in enumerate(all_indices):
-            g.append(sampled_class_0_indices[i * num_samples_per_class_per_group:(i + 1) * num_samples_per_class_per_group])
-    datasets = []
-    for group in all_indices:
-        sampled_indices = np.concatenate(group)
-        np.random.shuffle(sampled_indices)
-        sampled_dataset = dataset.select(sampled_indices)
-        datasets.append(sampled_dataset)
-    return datasets
+# def select_shuffled_balanced(dataset, total_size, num_groups = 1):
+#     possible_labels = len(dataset.features['label'].names)
+#     num_samples_per_class_per_group = total_size // possible_labels
+#     num_samples_per_class = num_groups * num_samples_per_class_per_group
+#     labels = np.array(dataset['label'])
+#     all_indices = [[] for _ in range(num_groups)]
+#     for i in range(possible_labels):
+#         class_0_indices = np.where(labels == i)[0]
+#         sampled_class_0_indices = np.random.choice(class_0_indices, num_samples_per_class, replace=False)
+#         for i, g in enumerate(all_indices):
+#             g.append(sampled_class_0_indices[i * num_samples_per_class_per_group:(i + 1) * num_samples_per_class_per_group])
+#     datasets = []
+#     for group in all_indices:
+#         sampled_indices = np.concatenate(group)
+#         np.random.shuffle(sampled_indices)
+#         sampled_dataset = dataset.select(sampled_indices)
+#         datasets.append(sampled_dataset)
+#     return datasets
 
 def load_noisy_dataset_by_task(task, train_size, val_size, noise_ratio=0.2):
     glue_datasets = load_dataset("glue", task) 
-    trainsets = select_shuffled_balanced(glue_datasets['train'], train_size, num_groups=1)
-    valsets = select_shuffled_balanced(glue_datasets['validation'], val_size, num_groups=1)
-    for i, valset in enumerate(valsets):
-        glue_datasets[f'validation{i}'] = valset
+    if train_size < len(glue_datasets['train']):
+        tmpsets = glue_datasets['train'].train_test_split(train_size = train_size, shuffle=True, seed=seed, stratify_by_column='label')
+        glue_datasets['train'] = tmpsets['train']
+    if val_size < len(glue_datasets['validation']):
+        tmpsets = glue_datasets['validation'].train_test_split(train_size = val_size, shuffle=True, seed=seed, stratify_by_column='label')  
+        glue_datasets['validation'] = tmpsets['train']
 
     if noise_ratio > 0.0:
         noise_index = set(np.random.choice(train_size, size=int(noise_ratio*train_size), replace=False))
     else:
         noise_index = []
 
-    for i, trainset in enumerate(trainsets):
-        glue_datasets[f'train{i}'] = trainset.map(flip_label, with_indices=True, fn_kwargs={'noise_index':noise_index})
+    glue_datasets['train'] = glue_datasets['train'].map(flip_label, with_indices=True, fn_kwargs={'noise_index':noise_index})
     
     glue_datasets.pop('test')
-    glue_datasets.pop('train')
-    glue_datasets.pop('validation')
     
     return glue_datasets
 
@@ -89,7 +88,7 @@ def load_tokenizer(tokenizer_name):
     tokenizer.pad_token_id = tokenizer.eos_token_id
     return tokenizer
 
-def preprocess(task = 'mrpc', noise_ratio = 0.2, train_size = 4500, val_size = 500,
+def preprocess(task = 'mrpc', noise_ratio = 0.2, train_size = 4500, val_size = 1000,
                 tokenizer_name='roberta-large'):
     ''' Preprocoess GLUE dataset of specific task '''
     config = dict(seed = seed, task=task, noise_ratio=noise_ratio, 
@@ -132,10 +131,18 @@ def preprocess(task = 'mrpc', noise_ratio = 0.2, train_size = 4500, val_size = 5
     tokenized_datasets.save_to_disk(dataset_path)
 
 def build_loaders(dataset_path, tokenizer_name, batch_size = 32, shuffle_train = True, 
-                    filter_fn = None, train_set_id = 0, val_set_id = 0):
+                    filter_fn = None, val_size = None):
     datasets = load_from_disk(dataset_path)
-    trainset = datasets[f'train{train_set_id}']        
-    valset = datasets[f'validation{val_set_id}']
+    trainset = datasets['train']  
+    n_val = len(datasets['validation'])
+    if val_size is not None and abs(val_size) < n_val:
+        if val_size < 0:
+            val_range = range(n_val + val_size, n_val)
+        else:
+            val_range = range(0, val_size)
+        valset = datasets['validation'].select(val_range)
+    else:
+        valset = datasets['validation']
     if filter_fn is not None:
         trainset = filter_fn(trainset)
     trainset = trainset.remove_columns(['noise'])
@@ -160,21 +167,19 @@ def convert_metrics(eval_metrics):
     return metrics
     
 def finetune(task = 'mrpc', low_rank = 4,
-         device = 'cuda', lr = 3e-4, model = 'roberta-large', batch_size = 32, train_set_id = 0, val_set_id = 0,
+         device = 'cuda', lr = 3e-4, model = 'roberta-large', batch_size = 32,
          num_epochs = 10, target_modules = ['value']):
     ''' Fine tune specific model on specific task and save it to disk for later postprocessing'''
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)
 
-    config.update(low_rank=low_rank, train_set_id=train_set_id, val_set_id=val_set_id,
-                  device=device, lr=lr, model=model, batch_size=batch_size,
+    config.update(low_rank=low_rank, device=device, lr=lr, model=model, batch_size=batch_size,
                   num_epochs=num_epochs, target_modules=target_modules)
 
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
     train_dataloader, eval_dataloader, tokenizer = \
-        build_loaders(dataset_path, config['tokenizer_name'], batch_size, 
-                      train_set_id=train_set_id, val_set_id=val_set_id)
+        build_loaders(dataset_path, config['tokenizer_name'], batch_size, val_size = 500)
 
     lora_model = build_LORA_model(model_name_or_path=model,
                                 target_modules=target_modules, 
@@ -209,14 +214,12 @@ def grads(task = 'mrpc'):
     with open(config_path, 'r') as file:
         config = json.load(file)
     device = config['device']
-    train_set_id = config['train_set_id']
-    val_set_id = config['val_set_id']
     model_path = os.path.join(cwd, f'm_{task}_{seed}')
     lora_model = load_pretrained_LORA_model(model_name_or_path=model_path)
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
     train_dataloader, eval_dataloader, _ = \
         build_loaders(dataset_path, config['tokenizer_name'], batch_size=1, 
-                        train_set_id=train_set_id, val_set_id=val_set_id, shuffle_train=False)
+                        shuffle_train=False, val_size=500)
     train_grads = compute_grads(lora_model, train_dataloader, device=device, bring_to_cpu=True)
     val_grads = compute_grads(lora_model, eval_dataloader, device=device, bring_to_cpu=True)
 
@@ -275,15 +278,12 @@ def infl(task = 'mrpc', compute_accurate = False, self_influence = False):
     torch.save(all_data, infl_path)
 
 def finetune2(task = 'mrpc',
-         num_epochs = 10, infl_key='influences', infl_method='DataInf', infl_module='',
-         val_set_id = 0, filter_perc = 0.7):
+         num_epochs = 10, infl_key='influences', infl_method='DataInf', infl_module='', filter_perc = 0.7):
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)    
     config.update(finetune2=dict(num_epochs=num_epochs, infl_key=infl_key, 
-                                 infl_method=infl_method, infl_module=infl_module, filter_perc=filter_perc,
-                                 val_set_id=val_set_id))
-    train_set_id = config['train_set_id']
+                                 infl_method=infl_method, infl_module=infl_module, filter_perc=filter_perc))
     all_influences = torch.load(os.path.join(cwd, f'i_{task}_{seed}.pt'))
     if infl_key in all_influences:
         module_influences = all_influences[infl_key][infl_method]
@@ -339,8 +339,7 @@ def finetune2(task = 'mrpc',
 
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
     train_dataloader, eval_dataloader, _ = \
-        build_loaders(dataset_path, config['tokenizer_name'], batch_size,
-            train_set_id = train_set_id, val_set_id = val_set_id, filter_fn=filter_fn)
+        build_loaders(dataset_path, config['tokenizer_name'], batch_size, filter_fn=filter_fn, val_size=-500)
 
     lora_model = build_LORA_model(model_name_or_path=model,
                                 target_modules=target_modules, 
