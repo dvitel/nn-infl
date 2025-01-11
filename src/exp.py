@@ -64,8 +64,8 @@ def select_shuffled_balanced(dataset, total_size, num_groups = 1):
 
 def load_noisy_dataset_by_task(task, train_size, val_size, noise_ratio=0.2):
     glue_datasets = load_dataset("glue", task) 
-    trainsets = select_shuffled_balanced(glue_datasets['train'], train_size, num_groups=3)
-    valsets = select_shuffled_balanced(glue_datasets['validation'], val_size, num_groups=3)
+    trainsets = select_shuffled_balanced(glue_datasets['train'], train_size, num_groups=1)
+    valsets = select_shuffled_balanced(glue_datasets['validation'], val_size, num_groups=1)
     for i, valset in enumerate(valsets):
         glue_datasets[f'validation{i}'] = valset
 
@@ -276,7 +276,7 @@ def infl(task = 'mrpc', compute_accurate = False, self_influence = False):
 
 def finetune2(task = 'mrpc',
          num_epochs = 10, infl_key='influences', infl_method='DataInf', infl_module='',
-         val_set_id = 1, filter_perc = 0.7):
+         val_set_id = 0, filter_perc = 0.7):
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)    
