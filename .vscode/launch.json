@@ -12,27 +12,74 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Infl: GLUE QNLI with DistilRoberta",
+            "name": "Preprocess: GLUE QNLI",
             "type": "debugpy",
             "request": "launch",
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "infl", "--run-id=0", "--task=qnli", "--model=distilbert/distilroberta-base", "--num-epochs=3"
-            ]
-        },
-        {
-            "name": "Metrics: GLUE QNLI with DistilRoberta",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "src/exp.py",
-            "console": "integratedTerminal",
-            "args": [
-                "filter", "--run-id=0", "--task=qnli", "--num-epochs=3"
+                "preprocess", "--task=qnli", "--tokenizer-name=distilbert/distilroberta-base"
             ],
             "env": {
-                "CUDA_LAUNCH_BLOCKING": "1"
+                "INFL_SEED": "0",
+                "INFL_CWD": "./data/dev"
             }
-        }
+        },
+        {
+            "name": "Fitetune: GLUE QNLI on DistilRoberta",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "finetune", "--task=qnli", "--model=distilbert/distilroberta-base", "--num-epochs=5"
+            ],
+            "env": {
+                "INFL_SEED": "0",
+                "INFL_CWD": "./data/dev"
+            }
+        },
+        {
+            "name": "Grad: GLUE QNLI on DistilRoberta",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "grads", "--task=qnli"
+            ],
+            "env": {
+                "INFL_SEED": "0",
+                "INFL_CWD": "./data/dev"
+            }
+        },
+        {
+            "name": "Infl: GLUE QNLI on DistilRoberta",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "infl", "--task=qnli", "--compute-accurate"
+            ],
+            "env": {
+                "INFL_SEED": "0",
+                "INFL_CWD": "./data/dev"
+            }
+        },
+        {
+            "name": "Finetune2: GLUE QNLI on DistilRoberta",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "finetune2", "--task=qnli", "--infl-key=influences", "--num-epochs=1"
+            ],
+            "env": {
+                "INFL_SEED": "0",
+                "INFL_CWD": "./data/dev"
+            }
+        }        
     ]
 }

@@ -5,17 +5,202 @@ import pandas as pd
 import pickle, os
 import torch
 
+# def avg_grad(self):
+#     ''' For a given set of tensors '''
+#     grad_avg_dict={}
+#     for weight_name in self.val_grad_dict[0]:
+#         self.val_grad_avg_dict[weight_name]=torch.zeros(self.val_grad_dict[0][weight_name].shape)
+#         for val_id in self.val_grad_dict:
+#             self.val_grad_avg_dict[weight_name] += self.val_grad_dict[val_id][weight_name] / self.n_val
+
+def compute_influence_from_hvp(modules_hvp, modules_grad, bring_to_cpu=False):
+    if_tmp_dict = {}
+    module_influences = defaultdict(dict)
+    total_infl = None
+    for module_name, module_grad in modules_grad.items():
+        module_hvp = modules_hvp[module_name]
+        module_infl_values = module_hvp * module_grad
+        module_infl = torch.sum(module_infl_values, dim=-1)
+        if total_infl is None:
+            total_infl = module_infl.clone()
+        else:
+            total_infl += module_infl
+        module_influences[module_name] = module_infl
+        del module_infl_values
+    module_influences[''] = total_infl
+    for infl in module_influences.values():
+        infl.neg_() 
+    if bring_to_cpu:
+        module_influences_cpu = {}
+        for module_name, module_infls in module_influences.items():
+            module_influences_cpu[module_name] = module_infls.cpu() 
+            del module_infls
+        module_influences = module_influences_cpu
+    return module_influences
+        
+    self.influences[method_name] = {layer_name:pd.Series(influences, dtype=float).to_numpy() for layer_name, influences in module_influences.items() }
+    self.influences[method_name][''] = pd.Series(if_tmp_dict, dtype=float).to_numpy()
+    # return {"runtime": self.time_dict, "influences": self.influences}
+
+def avg_grad(modules_grad):
+    avg_grads = {module_name: torch.mean(module_grads, dim=0) for module_name, module_grads in modules_grad.items()}        
+    return avg_grads
+
+def compute_hessian_free_influences(modules_train_grad, modules_val_grad, modules_avg_val_grads = None, 
+                                        bring_to_cpu = False):
+    should_free_avg_grad = False
+    start_time = time()
+    if modules_avg_val_grads is None:
+        modules_avg_val_grads = avg_grad(modules_val_grad)
+        should_free_avg_grad = True
+    modules_hvp = modules_avg_val_grads.copy()
+    module_infls = compute_influence_from_hvp(modules_hvp, modules_train_grad, bring_to_cpu=bring_to_cpu)
+    timespan = time() - start_time
+    del modules_hvp
+    if should_free_avg_grad:
+        del modules_avg_val_grads
+    return timespan, module_infls
+
+def compute_datainf_influences(modules_train_grad, modules_val_grad, modules_avg_val_grads = None, 
+                                    bring_to_cpu = False, lambda_const_param=10):
+    should_free_avg_grad = False
+    start_time = time()
+    if modules_avg_val_grads is None:
+        modules_avg_val_grads = avg_grad(modules_val_grad)
+        should_free_avg_grad = True
+    modules_hvp = {}
+    for module_name, module_avg_val_grads in modules_avg_val_grads.items():
+        module_train_grad = modules_train_grad[module_name]
+        module_train_grad_squares = module_train_grad ** 2
+        lambda_const = torch.mean(module_train_grad_squares) / lambda_const_param
+
+        C_tmp_values = module_avg_val_grads * module_train_grad
+        nom_values = torch.sum(C_tmp_values, dim=-1)
+        denom_values = lambda_const + torch.sum(module_train_grad_squares, dim=-1)
+        C_tmp = nom_values / denom_values
+
+        C_tmp_grad_values = C_tmp.view(-1, 1) * module_train_grad
+
+        const_val = lambda_const * module_train_grad.shape[0]
+
+        module_hvp_values = (module_avg_val_grads - C_tmp_grad_values) / const_val
+
+        module_hvp = torch.sum(module_hvp_values, dim=0)
+
+        modules_hvp[module_name] = module_hvp
+
+        del module_train_grad_squares, C_tmp_values, nom_values, denom_values, C_tmp, C_tmp_grad_values, module_hvp_values
+        # lambda_const computation
+        # S = torch.zeros(len(self.tr_grad_dict.keys()))
+        # for tr_id in self.tr_grad_dict:
+        #     tmp_grad = self.tr_grad_dict[tr_id][weight_name]
+        #     S[tr_id]=torch.mean(tmp_grad**2)
+        # lambda_const = torch.mean(S) / lambda_const_param # layer-wise lambda
+        
+        # hvp computation
+        # hvp=torch.zeros(self.val_grad_avg_dict[weight_name].shape)
+        # for tr_id in self.tr_grad_dict:
+        #     tmp_grad = self.tr_grad_dict[tr_id][weight_name]
+        #     C_tmp = torch.sum(self.val_grad_avg_dict[weight_name] * tmp_grad) / (lambda_const + torch.sum(tmp_grad**2))
+        #     hvp += (self.val_grad_avg_dict[weight_name] - C_tmp*tmp_grad) / (self.n_train*lambda_const)
+        # hvp_proposed_dict[weight_name] = hvp 
+    module_infls = compute_influence_from_hvp(modules_hvp, modules_train_grad, bring_to_cpu=bring_to_cpu)
+    timespan = time() - start_time
+    if should_free_avg_grad:
+        del modules_avg_val_grads
+    return timespan, module_infls
+
+def compute_accurate_influences(modules_train_grad, modules_val_grad, modules_avg_val_grads = None, 
+                                    bring_to_cpu = False, lambda_const_param=10):
+    should_free_avg_grad = False
+    start_time = time()
+    if modules_avg_val_grads is None:
+        modules_avg_val_grads = avg_grad(modules_val_grad)
+        should_free_avg_grad = True
+    modules_hvp = {}
+    for module_name, module_avg_val_grads in modules_avg_val_grads.items():
+        module_train_grad = modules_train_grad[module_name]
+        module_train_grad_squares = module_train_grad ** 2
+        lambda_const = torch.mean(module_train_grad_squares) / lambda_const_param
+
+        # module_train_grad_flat = module_train_grad.reshape(-1)
+        AAt_matrix = torch.einsum("ki,kj->ij", module_train_grad, module_train_grad)
+        # AAt_matrix = torch.sum(AAt_matrix_values, dim=0)
+        L, V = torch.linalg.eig(AAt_matrix)
+        L, V = L.float(), V.float()
+        module_hvp_0 = module_avg_val_grads.reshape(-1) @ V
+        denom_values = lambda_const + L / module_train_grad.shape[0]
+        module_hvp_1 = module_hvp_0 / denom_values
+        module_hvp = module_hvp_1 @ V.T
+        modules_hvp[module_name] = module_hvp
+
+        del module_train_grad_squares, AAt_matrix, L, V, module_hvp_0, denom_values, module_hvp_1, module_hvp  # to save memory
+
+        # lambda_const computation
+        # S=torch.zeros(len(self.tr_grad_dict.keys()))
+        # for tr_id in self.tr_grad_dict:
+        #     tmp_grad = self.tr_grad_dict[tr_id][weight_name]
+        #     S[tr_id]=torch.mean(tmp_grad**2)
+        # lambda_const = torch.mean(S) / lambda_const_param # layer-wise lambda
+
+        # hvp computation (eigenvalue decomposition)
+        # AAt_matrix = torch.zeros(torch.outer(self.tr_grad_dict[0][weight_name].reshape(-1), 
+        #                                         self.tr_grad_dict[0][weight_name].reshape(-1)).shape)
+        # for tr_id in self.tr_grad_dict: 
+        #     tmp_mat = torch.outer(self.tr_grad_dict[tr_id][weight_name].reshape(-1), 
+        #                             self.tr_grad_dict[tr_id][weight_name].reshape(-1))
+        #     AAt_matrix += tmp_mat
+            
+        # L, V = torch.linalg.eig(AAt_matrix)
+        # L, V = L.float(), V.float()
+        # hvp = self.val_grad_avg_dict[weight_name].reshape(-1) @ V
+        # hvp = (hvp / (lambda_const + L/ self.n_train)) @ V.T
+
+        # hvp_accurate_dict[weight_name] = hvp.reshape(len(self.tr_grad_dict[0][weight_name]), -1)
+        # del tmp_mat, AAt_matrix, V # to save memory
+    module_infls = compute_influence_from_hvp(modules_hvp, modules_train_grad, bring_to_cpu=bring_to_cpu)
+    timespan = time() - start_time
+    if should_free_avg_grad:
+        del modules_avg_val_grads    
+    return timespan, module_infls
+
+def compute_lissa_influences(modules_train_grad, modules_val_grad, modules_avg_val_grads = None, 
+                                bring_to_cpu = False, lambda_const_param=10, n_iteration=10, alpha_const=1.):
+    should_free_avg_grad = False
+    start_time = time()
+    if modules_avg_val_grads is None:
+        modules_avg_val_grads = avg_grad(modules_val_grad)
+        should_free_avg_grad = True
+    modules_hvp = {}
+    for module_name, module_avg_val_grads in modules_avg_val_grads.items():
+        # lambda_const computation
+        module_train_grad = modules_train_grad[module_name]
+        n_train = module_train_grad.shape[0]
+        module_train_grad_squares = module_train_grad ** 2
+        lambda_const = torch.mean(module_train_grad_squares) / lambda_const_param
+
+        # hvp computation
+        running_hvp = module_avg_val_grads
+        for _ in range(n_iteration):
+            hvp_tmp_values = module_train_grad * running_hvp
+            hvp_tmp_sum = torch.sum(hvp_tmp_values, dim=-1)
+            hvp_tmp_0 = (hvp_tmp_sum.view(-1, 1) * module_train_grad - lambda_const * running_hvp) / n_train
+            hvp_tmp = torch.sum(hvp_tmp_0, dim=0)
+            running_hvp = module_avg_val_grads + running_hvp - alpha_const * hvp_tmp
+        modules_hvp[module_name] = running_hvp 
+    module_infls = compute_influence_from_hvp(modules_hvp, modules_train_grad, bring_to_cpu=bring_to_cpu)
+    timespan = time() - start_time
+    if should_free_avg_grad:
+        del modules_avg_val_grads    
+    return timespan, module_infls
+
 class IFEngine(object):
-    def __init__(self):
+    def __init__(self, tr_grad_dict, val_grad_dict):
         self.time_dict=defaultdict(list)
         self.hvp_dict=defaultdict(list)
-        self.IF_dict=defaultdict(list)
         self.influences=defaultdict(dict)
-
-    def preprocess_gradients(self, tr_grad_dict, val_grad_dict, noise_index):
         self.tr_grad_dict = tr_grad_dict
         self.val_grad_dict = val_grad_dict
-        self.noise_index = noise_index
 
         self.n_train = len(self.tr_grad_dict.keys())
         self.n_val = len(self.val_grad_dict.keys())
@@ -114,17 +299,6 @@ class IFEngine(object):
         self.hvp_dict['LiSSA'] = hvp_LiSSA_dict
         self.time_dict['LiSSA'] = time()-start_time 
 
-    def compute_IF(self):
-        for method_name in self.hvp_dict:
-            if_tmp_dict = {}
-            for tr_id in self.tr_grad_dict:
-                if_tmp_value = 0
-                for weight_name in self.val_grad_avg_dict:
-                    if_tmp_value += torch.sum(self.hvp_dict[method_name][weight_name]*self.tr_grad_dict[tr_id][weight_name])
-                if_tmp_dict[tr_id]= -if_tmp_value 
-                
-            self.IF_dict[method_name] = pd.Series(if_tmp_dict, dtype=float).to_numpy()
-
     def compute_all_influences(self):
         for method_name in self.hvp_dict:
             if_tmp_dict = {}
@@ -133,25 +307,12 @@ class IFEngine(object):
                 if_tmp_value = 0
                 for weight_name in self.val_grad_avg_dict:
                     layer_influence = torch.sum(self.hvp_dict[method_name][weight_name]*self.tr_grad_dict[tr_id][weight_name])
-                    module_influences[weight_name][tr_id] = layer_influence
+                    module_influences[weight_name][tr_id] = -layer_influence
                     if_tmp_value += layer_influence
                 if_tmp_dict[tr_id]= -if_tmp_value 
                 
             self.influences[method_name] = {layer_name:pd.Series(influences, dtype=float).to_numpy() for layer_name, influences in module_influences.items() }
-            self.IF_dict[method_name] = pd.Series(if_tmp_dict, dtype=float).to_numpy()
-            self.influences[method_name][''] = self.IF_dict[method_name]
-        return {"runtime": self.time_dict, "influences": self.influences}
-
-    def save_result(self, noise_index, run_id=0):
-        results={}
-        results['runtime']=self.time_dict
-        results['noise_index']=noise_index
-        results['influence']=self.IF_dict
-
-        with open(f"./results_{run_id}.pkl",'wb') as file:
-            pickle.dump(results, file)
-
-    def get_metrics(self):
+            self.influences[method_name][''] = pd.Series(if_tmp_dict, dtype=float).to_numpy()
         return {"runtime": self.time_dict, "influences": self.influences}
 
 class IFEngineGeneration(object):
@@ -221,3 +382,47 @@ class IFEngineGeneration(object):
 
         with open(f"./results_{run_id}.pkl",'wb') as file:
             pickle.dump(results, file)
+
+
+def test_infl_are_same():
+    tran_grads = {"layer1": torch.randn(30, 100, 5), "layer2": torch.randn(30, 5, 300) }
+    val_grads = {"layer1": torch.randn(20, 100, 5), "layer2": torch.randn(20, 5, 300) }
+    tran_grad_dict = defaultdict(dict)
+    for layer, grad in tran_grads.items():
+        for i in range(grad.shape[0]):
+            tran_grad_dict[i][layer] = grad[i]
+    val_grad_dict = defaultdict(dict)
+    for layer, grad in val_grads.items():
+        for i in range(grad.shape[0]):
+            val_grad_dict[i][layer] = grad[i]  
+    tran_grads = {layer: grad.reshape(grad.shape[0], -1) for layer, grad in tran_grads.items()}
+    val_grads = {layer: grad.reshape(grad.shape[0], -1) for layer, grad in val_grads.items()}
+    _, hf = compute_hessian_free_influences(tran_grads, val_grads)
+    _, di = compute_datainf_influences(tran_grads, val_grads)
+    _, li = compute_lissa_influences(tran_grads, val_grads)
+    _, ai = compute_accurate_influences(tran_grads, val_grads)
+    eng = IFEngine(tran_grad_dict, val_grad_dict)
+    eng.compute_hvps(compute_accurate=True)
+    res2 = eng.compute_all_influences()
+    infls = res2['influences']
+    hf2 = infls['identity']    
+    di2 = infls['DataInf']
+    li2 = infls['LiSSA']
+    ai2 = infls['accurate']
+    for l in hf.keys():
+        x, y = hf[l], torch.tensor(hf2[l], dtype=torch.float)
+        assert torch.allclose(x, y, atol=1e-5), f'Hessian Free for layer {l} in not same: {x} and {y}'
+    for l in di.keys():
+        x, y = di[l], torch.tensor(di2[l], dtype=torch.float)
+        assert torch.allclose(x, y, atol=1e-5), f'DataInf for layer {l} in not same: {x} and {y}'
+    for l in li.keys():
+        x, y = li[l], torch.tensor(li2[l], dtype=torch.float)
+        assert torch.allclose(x, y, rtol=1e-3), f'LISSA for layer {l} in not same: {x} and {y}'
+    for l in ai.keys():
+        x, y = ai[l], torch.tensor(ai2[l], dtype=torch.float)
+        assert torch.allclose(x, y, atol=1e-4), f'Exact for layer {l} in not same: {x} and {y}'
+    pass
+
+if __name__ == "__main__":
+    test_infl_are_same()
+    pass
