@@ -208,11 +208,12 @@ def finetune(task = 'mrpc', low_rank = 4,
     with torch.no_grad():
         torch.cuda.empty_cache()
 
-def grads(task = 'mrpc'):
+def grads(task = 'mrpc', no_val = False, return_grads = False, config = None):
     ''' Computes gradients for modules of the model'''
-    config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
-    with open(config_path, 'r') as file:
-        config = json.load(file)
+    if config is None:
+        config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
+        with open(config_path, 'r') as file:
+            config = json.load(file)
     device = config['device']
     model_path = os.path.join(cwd, f'm_{task}_{seed}')
     lora_model = load_pretrained_LORA_model(model_name_or_path=model_path)
@@ -220,95 +221,98 @@ def grads(task = 'mrpc'):
     train_dataloader, eval_dataloader, _ = \
         build_loaders(dataset_path, config['tokenizer_name'], batch_size=1, 
                         shuffle_train=False, val_size=500)
-    train_grads = compute_grads(lora_model, train_dataloader, device=device, bring_to_cpu=True)
-    val_grads = compute_grads(lora_model, eval_dataloader, device=device, bring_to_cpu=True)
+    train_grads = compute_grads(lora_model, train_dataloader, device=device, bring_to_cpu=not return_grads)
+    if no_val:
+        val_grads = {}
+    else:
+        val_grads = compute_grads(lora_model, eval_dataloader, device=device, bring_to_cpu=not return_grads)
 
-    grad_path = os.path.join(cwd, f'g_{task}_{seed}.pt')
-    torch.save({'train': train_grads, 'validation': val_grads}, grad_path)
+    if return_grads:
+        return {'train': train_grads, 'validation': val_grads}
+    else:
+        grad_path = os.path.join(cwd, f'g_{task}_{seed}.pt')
+        torch.save({'train': train_grads, 'validation': val_grads}, grad_path)
 
-def infl(task = 'mrpc', compute_accurate = False, self_influence = False):
+# add new methods here
+influence_methods = \
+    {
+        "hf": compute_hessian_free_influences,
+        "datainf": compute_datainf_influences,
+        "lissa": compute_lissa_influences,
+        "exact": compute_accurate_influences
+    }
+
+def infl(task = 'mrpc', methods = "datainf,lissa", self_influence = False, with_grads = False):
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)
 
     device = config['device']
 
-    grads = torch.load(os.path.join(cwd, f'g_{task}_{seed}.pt'))
-
-    train_grads = {k:v.to(device) for k, v in grads['train'].items()}
-    val_grads = {k:v.to(device) for k, v in grads['validation'].items()}
-
-    # only for some infl methods
-    def compute_all(train_grads, val_grads):
-        avg_val_grads = {module_name: torch.mean(module_grads, dim=0) for module_name, module_grads in val_grads.items()}
-        # influence functions
-        runtimes = {}
-        influences = {}
-        hessian_free_runtime, hessian_free_infl = compute_hessian_free_influences(train_grads, val_grads, avg_val_grads, bring_to_cpu=True)
-        influences['HessianFree'] = hessian_free_infl
-        runtimes['HessianFree'] = hessian_free_runtime
-        datainf_runtime, datainf_infl = compute_datainf_influences(train_grads, val_grads, avg_val_grads, bring_to_cpu=True)
-        influences['DataInf'] = datainf_infl
-        runtimes['DataInf'] = datainf_runtime
-        lissa_runtime, lissa_infl = compute_lissa_influences(train_grads, val_grads, avg_val_grads, bring_to_cpu=True)
-        influences['Lissa'] = lissa_infl
-        runtimes['Lissa'] = lissa_runtime
-        if compute_accurate:
-            accurate_runtime, accurate_infl = compute_accurate_influences(train_grads, val_grads, avg_val_grads, bring_to_cpu=True)
-            influences['Exact'] = accurate_infl
-            runtimes['Exact'] = accurate_runtime
-        return influences, runtimes
-
-    prefix = ""
-    if self_influence:
-        selfinfluences, selfruntimes = compute_all(train_grads, train_grads)
-        all_data = {'influences': selfinfluences, 'runtimes': selfruntimes}
-        prefix = "s"
+    if with_grads:
+        gradients = grads(task = task, return_grads=True, config=config, no_val=self_influence)
     else:
-        influences, runtimes = compute_all(train_grads, val_grads)
-        all_data = {'influences': influences, 'runtimes': runtimes}
+        gradients = torch.load(os.path.join(cwd, f'g_{task}_{seed}.pt'))
+    
+    train_grads = {k:v.to(device) for k, v in gradients['train'].items()}
 
-    # selfinfluence_engine = IFEngine(tr_grad_dict, tr_grad_dict)
-    # selfinfluence_engine.preprocess_gradients(tr_grad_dict, tr_grad_dict, noise_index)
-    # selfinfluence_engine.compute_hvps(compute_accurate=compute_accurate)
-    # selfinfluences = selfinfluence_engine.compute_all_influences()
+    if self_influence:
+        val_grads = train_grads
+    else:        
+        val_grads = {k:v.to(device) for k, v in gradients['validation'].items()}
 
+    runtimes = {}
+    influences = {}
+    for infl_method in methods.split(','):
+        if infl_method not in influence_methods:
+            continue
+        # NOTE: not all methods require mean gradients
+        avg_val_grads = {module_name: torch.mean(module_grads, dim=0) for module_name, module_grads in val_grads.items()}
+        method_fn = influence_methods[infl_method]
+        runtine, inf_tensors = method_fn(train_grads, val_grads, avg_val_grads, bring_to_cpu=True)
+        influences[infl_method] = inf_tensors
+        runtimes[infl_method] = runtine
 
-    infl_path = os.path.join(cwd, f'{prefix}i_{task}_{seed}.pt')
-    torch.save(all_data, infl_path)
+    config["infl_runtimes"] = runtimes
+
+    for infl_method, infls in influences.items():
+        infl_path = os.path.join(cwd, f'i_{infl_method}_{task}_{seed}.pt')
+        torch.save(infls, infl_path)
+
+    with open(config_path, 'w') as file:
+        json.dump(config, file)
 
 def finetune2(task = 'mrpc',
-         num_epochs = 10, infl_key='influences', infl_method='DataInf', infl_module='', filter_perc = 0.7):
+         num_epochs = 10, filter_method='infl', infl_method='datainf', module_pattern='', filter_perc = 0.7):
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)    
-    config.update(finetune2=dict(num_epochs=num_epochs, infl_key=infl_key, 
-                                 infl_method=infl_method, infl_module=infl_module, filter_perc=filter_perc))
-    all_influences = torch.load(os.path.join(cwd, f'i_{task}_{seed}.pt'))
-    if infl_key in all_influences:
-        module_influences = all_influences[infl_key][infl_method]
+    config.update(finetune2=dict(num_epochs=num_epochs, filter_method=filter_method,
+                                 infl_method=infl_method, module_pattern=module_pattern, filter_perc=filter_perc))
+    device = config['device']
+    lr = config['lr']
+    model = config['model']
+    batch_size = config['batch_size']
+    target_modules = config['target_modules']
+    if filter_method == "infl":
+        influences = torch.load(os.path.join(cwd, f'i_{infl_method}_{task}_{seed}.pt'))
 
-        device = config['device']
-        lr = config['lr']
-        model = config['model']
-        batch_size = config['batch_size']
-        target_modules = config['target_modules']
-        if infl_module == '':
-            num_modules = -1
-            influence = module_influences[''].to(device)
+        if module_pattern == '':
+            num_modules = len(influences) - 1 #1 is for ''
+            influence = influences[''].to(device)
         else:
-            num_modules = 0
-            pattern = re.compile(re.escape(infl_module))
+            pattern = re.compile(module_pattern)
             influence = None
-            for module in module_influences:
+            num_modules = 0
+            for module in influences:
                 if pattern.match(module): 
                     if influence is None:
-                        influence = module_influences[module].to(device)
+                        influence = influences[module].to(device)
                     else:
-                        influence += module_influences[module].to(device)
+                        influence += influences[module].to(device)
                     num_modules += 1
         if num_modules == 0:
-            print(f"No modules match patter {infl_module}")
+            print(f"No modules match patter {module_pattern}")
             return
         config['finetune2']['num_modules'] = num_modules
         
@@ -320,13 +324,13 @@ def finetune2(task = 'mrpc',
             filtered_indexes = high_to_low_quality[:filter_len].cpu().numpy()
             return train_dataset.select(filtered_indexes)
         filter_fn = infl_filter
-    elif infl_key == 'rand':
+    elif filter_method == 'rand':
         def rand_filter(train_dataset):
             filter_len = int(filter_perc*len(train_dataset))
             filtered_indexes = np.random.choice(len(train_dataset), filter_len, replace=False)
             return train_dataset.select(filtered_indexes)
         filter_fn = rand_filter        
-    elif infl_key == 'denoise':
+    elif filter_method == 'denoise':
         def denoise_map(example):
             if example['noise']:
                 example['labels'] = 1 - example['labels'] 

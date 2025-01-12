@@ -18,6 +18,7 @@ task_cwd=/data/dvitel/infl/$task
 
 for run_id in {0..10}; do
     echo "Starting finetune2 $task $run_id"
-    srun --export=ALL,INFL_SEED=$run_id,INFL_CWD=$task_cwd python ~/infl/src/exp.py finetune2 --task=$task --infl-key=influences --infl-method=DataInf
+    # example of module-pattern --module-pattern=.\*\\.layer\\.0\\..\*\\.lora_\(A\|B\)\\..\*   --  picks LORA modules from first layer
+    srun --export=ALL,INFL_SEED=$run_id,INFL_CWD=$task_cwd python ~/infl/src/exp.py finetune2 --task=$task --filter-method=infl --infl-method=datainf --module-pattern=
     echo "Done finetune2 $task $run_id"
 done

@@ -18,6 +18,6 @@ task_cwd=/data/dvitel/infl/$task
 
 for run_id in {0..10}; do
     echo "Starting influences $task $run_id"
-    srun --export=ALL,INFL_SEED=$run_id,INFL_CWD=$task_cwd python ~/infl/src/exp.py infl --task=$task --compute-accurate --self-influence
+    srun --export=ALL,INFL_SEED=$run_id,INFL_CWD=$task_cwd python ~/infl/src/exp.py infl --task=$task --methods=hf,datainf,lissa,exact --with-grads --self-influence
     echo "Done influences $task $run_id"
 done

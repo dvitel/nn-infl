@@ -32,7 +32,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "finetune", "--task=qnli", "--model=distilbert/distilroberta-base", "--num-epochs=5"
+                "finetune", "--task=qnli", "--model=distilbert/distilroberta-base", "--num-epochs=2"
             ],
             "env": {
                 "INFL_SEED": "0",
@@ -60,7 +60,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "infl", "--task=qnli", "--compute-accurate"
+                "infl", "--task=qnli", "--methods=hf,datainf,lissa,exact", "--with-grads", "--self-influence"
             ],
             "env": {
                 "INFL_SEED": "0",
@@ -74,7 +74,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "finetune2", "--task=qnli", "--infl-key=influences", "--num-epochs=1"
+                "finetune2", "--task=qnli", "--filter-method=infl", "--infl-method=hf", "--num-epochs=1", "--module-pattern=.*\\.layer\\.0\\..*\\.lora_(A|B)\\..*"
             ],
             "env": {
                 "INFL_SEED": "0",
