@@ -5,6 +5,7 @@
 #SBATCH -p Quick # run on partition general
 #SBATCH --open-mode=append
 #SBATCH --gpus=1 # 1 GPU
+#SBATCH --exclude GPU49,GPU50,GPU51,GPU52
 #SBATCH --array=0-3
 
 conda activate torch-env

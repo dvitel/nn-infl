@@ -297,24 +297,20 @@ def finetune2(task = 'mrpc',
     if filter_method == "infl":
         influences = torch.load(os.path.join(cwd, f'i_{infl_method}_{task}_{seed}.pt'))
 
+        module_names = [] # all modules
         if module_pattern == '':
-            num_modules = len(influences) - 1 #1 is for ''
             influence = influences[''].to(device)
         else:
             pattern = re.compile(module_pattern)
             influence = None
-            num_modules = 0
             for module in influences:
                 if pattern.match(module): 
                     if influence is None:
                         influence = influences[module].to(device)
                     else:
                         influence += influences[module].to(device)
-                    num_modules += 1
-        if num_modules == 0:
-            print(f"No modules match patter {module_pattern}")
-            return
-        config['finetune2']['num_modules'] = num_modules
+                    module_names.append(module)
+        config['finetune2']['module_names'] = module_names
         
         # fine-tuning models
 
@@ -343,7 +339,7 @@ def finetune2(task = 'mrpc',
 
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
     train_dataloader, eval_dataloader, _ = \
-        build_loaders(dataset_path, config['tokenizer_name'], batch_size, filter_fn=filter_fn, val_size=-500)
+        build_loaders(dataset_path, config['tokenizer_name'], batch_size, filter_fn=filter_fn, val_size=500)
 
     lora_model = build_LORA_model(model_name_or_path=model,
                                 target_modules=target_modules, 
