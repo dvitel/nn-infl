@@ -332,7 +332,7 @@ def finetune2(task = 'mrpc',
                 example['labels'] = 1 - example['labels'] 
             return example               
         def denoise_filter(train_dataset):
-            train_dataset.map(denoise_map, remove_columns=['noise'])
+            return train_dataset.map(denoise_map)
         filter_fn = denoise_filter
     else:
         filter_fn = None

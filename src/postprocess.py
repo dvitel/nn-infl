@@ -1,4 +1,5 @@
 from collections import defaultdict
+import json
 import os
 import pickle
 import re
@@ -75,6 +76,46 @@ def draw_curve(task="mrpc", res_folder = "./data/", datasets_folder = "./data/",
     plt.savefig(out)  
     plt.clf()  
 
+def draw_ft2_metric(infile: str, outfile: str, metric = 'accuracy'):
+    with open(infile, 'r') as f:
+        json_lines = f.readlines()
+    all_metrics = [json.loads(l) for l in json_lines]
+    method_metrics = defaultdict(list)
+    for metrics in all_metrics:
+        metric_values = metrics['metrics'][metric]
+        infl_method = metrics['finetune2']['infl_method']
+        filter_method = metrics['finetune2']['filter_method']
+        if filter_method  == 'infl':
+            filter_method = infl_method
+        method_metrics[filter_method].append(metric_values)
+
+    for method, metrics in method_metrics.items():
+        metric_values = np.array(metrics) * 100
+        mean = np.mean(metric_values, axis=0)
+        confidence_level = 0.95
+        degrees_freedom = metric_values.shape[0] - 1
+        sample_standard_error = stats.sem(metric_values, axis=0)
+        confidence_interval = stats.t.interval(confidence_level, degrees_freedom, mean, sample_standard_error)
+        min_v = confidence_interval[0]
+        max_v = confidence_interval[1]
+        plt.plot(np.arange(1, 11), mean, label=method, marker='o', markersize=5, linewidth=1)
+        plt.fill_between(np.arange(1, 11), min_v, max_v, alpha=.05, linewidth=0)
+    
+    plt.ioff()
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy, %')
+    # plt.xticks(fontsize=12)
+    # plt.yticks(fontsize=12)
+    plt.legend(fontsize='small')
+    plt.title(f'Performance on filtered training set', fontsize=15)
+    plt.tight_layout()
+    plt.savefig(outfile)  
+    plt.clf()  
+
+
+
 if __name__ == "__main__":
     # draw_curve(res_filer='infl_qnli_', out = "./data/auc/qnli.png")    
-    draw_curve(task="qnli", res_folder = "./data/self-infl", module_pattern = '', datasets_folder = './data/datasets', out = "./data/auc/qnli.png")
+    # draw_curve(task="qnli", res_folder = "./data/self-infl", module_pattern = '', datasets_folder = './data/datasets', out = "./data/auc/qnli.png")
+    for d in ['mrpc', 'qnli', 'qqp', 'sst2']:
+        draw_ft2_metric(infile = f'./data/ft2-infl/{d}.jsonlist', outfile = f'./data/accuracy/{d}.png', metric = 'accuracy')
