@@ -289,6 +289,7 @@ def finetune2(task = 'mrpc',
         config = json.load(file)    
     config.update(finetune2=dict(num_epochs=num_epochs, filter_method=filter_method,
                                  infl_method=infl_method, module_pattern=module_pattern, filter_perc=filter_perc))
+    print(f"Finetune with modules: {module_pattern}")
     device = config['device']
     lr = config['lr']
     model = config['model']
