@@ -83,7 +83,7 @@ def draw_mislabel_detection_rate(task="mrpc", res_folder = "./data/", datasets_f
     plt.savefig(out)  
     plt.clf()  
 
-def draw_ft2_metric(task: str, infile: str, outfile: str, metric = 'accuracy'):
+def draw_ft2_metric(task: str, infile: str, outfile: str, metric = 'accuracy', influence_method = "", module_pattern_to_name = {}):
     with open(infile, 'r') as f:
         json_lines = f.readlines()
     all_metrics = [json.loads(l) for l in json_lines]
@@ -91,9 +91,16 @@ def draw_ft2_metric(task: str, infile: str, outfile: str, metric = 'accuracy'):
     for metrics in all_metrics:
         metric_values = metrics['metrics'][metric]
         infl_method = metrics['finetune2']['infl_method']
+        if influence_method != "" and influence_method != infl_method:
+            continue
+        module_pattern = metrics['finetune2']['module_pattern']
+        if module_pattern in module_pattern_to_name:
+            module_pattern = module_pattern_to_name[module_pattern]
         filter_method = metrics['finetune2']['filter_method']
         if filter_method  == 'infl':
             filter_method = infl_method
+        if module_pattern != "":
+            filter_method = f'{filter_method}, {module_pattern}'
         method_metrics[filter_method].append(metric_values)
 
     method_names = sorted(method_metrics.keys())
@@ -136,26 +143,32 @@ def list_modules(infl_file: str, module_pattern = ''):
         print(f"{module_name}")
 
 if __name__ == "__main__":
-    for ds in ['mrpc', 'qnli', 'qqp', 'sst2']:
-        draw_mislabel_detection_rate(task=ds, res_folder = "./data/infl", module_pattern = '', 
-                                    datasets_folder = './data/datasets', out = f"./data/mdr/{ds}.png")
+    # for ds in ['mrpc', 'qnli', 'qqp', 'sst2']:
+    #     draw_mislabel_detection_rate(task=ds, res_folder = "./data/infl", module_pattern = '', 
+    #                                 datasets_folder = './data/datasets', out = f"./data/mdr/{ds}.png")
         
-    for ds in ['mrpc', 'qnli', 'qqp', 'sst2']:
-        draw_mislabel_detection_rate(task=ds, res_folder = "./data/infl", module_pattern = '.*\.layer\.[0-7]\..*\.lora_(A|B)\..*', 
-                                    datasets_folder = './data/datasets', out = f"./data/mdr-0/{ds}.png", title="Layers 0-7")
+    # for ds in ['mrpc', 'qnli', 'qqp', 'sst2']:
+    #     draw_mislabel_detection_rate(task=ds, res_folder = "./data/infl", module_pattern = '.*\.layer\.[0-7]\..*\.lora_(A|B)\..*', 
+    #                                 datasets_folder = './data/datasets', out = f"./data/mdr-0/{ds}.png", title="Layers 0-7")
 
-    for ds in ['mrpc', 'qnli', 'qqp', 'sst2']:
-        draw_mislabel_detection_rate(task=ds, res_folder = "./data/infl", module_pattern = '.*\.layer\.([8-9]|1[0-5])\..*\.lora_(A|B)\..*', 
-                                    datasets_folder = './data/datasets', out = f"./data/mdr-1/{ds}.png", title="Layers 8-15")
+    # for ds in ['mrpc', 'qnli', 'qqp', 'sst2']:
+    #     draw_mislabel_detection_rate(task=ds, res_folder = "./data/infl", module_pattern = '.*\.layer\.([8-9]|1[0-5])\..*\.lora_(A|B)\..*', 
+    #                                 datasets_folder = './data/datasets', out = f"./data/mdr-1/{ds}.png", title="Layers 8-15")
 
-    for ds in ['mrpc', 'qnli', 'qqp', 'sst2']:
-        draw_mislabel_detection_rate(task=ds, res_folder = "./data/infl", module_pattern = '.*\.layer\.(1[6-9]|2[0-3])\..*\.lora_(A|B)\..*', 
-                                    datasets_folder = './data/datasets', out = f"./data/mdr-2/{ds}.png", title="Layers 16-23")
+    # for ds in ['mrpc', 'qnli', 'qqp', 'sst2']:
+    #     draw_mislabel_detection_rate(task=ds, res_folder = "./data/infl", module_pattern = '.*\.layer\.(1[6-9]|2[0-3])\..*\.lora_(A|B)\..*', 
+    #                                 datasets_folder = './data/datasets', out = f"./data/mdr-2/{ds}.png", title="Layers 16-23")
         
-    for ds in ['mrpc', 'qnli', 'qqp', 'sst2']:
-        draw_mislabel_detection_rate(task=ds, res_folder = "./data/infl", module_pattern = '.*\.classifier\..*', 
-                                    datasets_folder = './data/datasets', out = f"./data/mdr-3/{ds}.png", title="Classifier")        
+    # for ds in ['mrpc', 'qnli', 'qqp', 'sst2']:
+    #     draw_mislabel_detection_rate(task=ds, res_folder = "./data/infl", module_pattern = '.*\.classifier\..*', 
+    #                                 datasets_folder = './data/datasets', out = f"./data/mdr-3/{ds}.png", title="Classifier")        
 
     # for ds in ['mrpc', 'qnli', 'qqp', 'sst2']:
     #     draw_ft2_metric(task = ds, infile = f'./data/ft2-infl/{ds}.jsonlist', outfile = f'./data/accuracy/{ds}.png', metric = 'accuracy')
     # list_modules('./data/infl/mrpc/i_datainf_mrpc_0.pt', '') #'.*\.layer\.(1[6-9]|2[0-3])\..*\.lora_(A|B)\..*')
+    # draw_curve(res_filer='infl_qnli_', out = "./data/auc/qnli.png")    
+    # draw_curve(task="qnli", res_folder = "./data/self-infl", module_pattern = '', datasets_folder = './data/datasets', out = "./data/auc/qnli.png")
+    module_pattern_to_name = {".*\\.layer\\.(1[6-9]|2[0-3])\\..*\\.lora_(A|B)\\..*": "last 8", "": "all"}
+    for d in ['mrpc', 'qnli', 'qqp', 'sst2']:
+        draw_ft2_metric(d, infile = f'./data/ft2-infl/{d}.jsonlist', outfile = f'./data/accuracy/{d}.png', 
+                        influence_method = "lissa", metric = 'accuracy', module_pattern_to_name = module_pattern_to_name)
