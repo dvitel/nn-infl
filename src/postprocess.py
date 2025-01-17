@@ -83,7 +83,7 @@ def draw_mislabel_detection_rate(task="mrpc", res_folder = "./data/", datasets_f
     plt.savefig(out)  
     plt.clf()  
 
-def draw_ft2_metric(task: str, infile: str, outfile: str, metric = 'accuracy', influence_method = "", module_pattern_to_name = {}):
+def draw_ft2_metric(task: str, infile: str, outfile: str, metric = 'accuracy', influence_method = "", module_pattern_to_name = {}, allowed_filter_methods = ['rand', 'denoise', 'none']):
     with open(infile, 'r') as f:
         json_lines = f.readlines()
     all_metrics = [json.loads(l) for l in json_lines]
@@ -91,15 +91,18 @@ def draw_ft2_metric(task: str, infile: str, outfile: str, metric = 'accuracy', i
     for metrics in all_metrics:
         metric_values = metrics['metrics'][metric]
         infl_method = metrics['finetune2']['infl_method']
-        if influence_method != "" and influence_method != infl_method:
+        filter_method = metrics['finetune2']['filter_method']                
+        if (influence_method != "" and influence_method != infl_method) and (filter_method not in allowed_filter_methods):
             continue
         module_pattern = metrics['finetune2']['module_pattern']
-        if module_pattern in module_pattern_to_name:
-            module_pattern = module_pattern_to_name[module_pattern]
-        filter_method = metrics['finetune2']['filter_method']
+        if module_pattern not in module_pattern_to_name:
+            continue
+        module_pattern = module_pattern_to_name[module_pattern]
+        is_infl = False
         if filter_method  == 'infl':
             filter_method = infl_method
-        if module_pattern != "":
+            is_infl = True
+        if module_pattern != "" and is_infl:
             filter_method = f'{filter_method}, {module_pattern}'
         method_metrics[filter_method].append(metric_values)
 
@@ -115,8 +118,13 @@ def draw_ft2_metric(task: str, infile: str, outfile: str, metric = 'accuracy', i
         confidence_interval = stats.t.interval(confidence_level, degrees_freedom, mean, sample_standard_error)
         min_v = confidence_interval[0]
         max_v = confidence_interval[1]
-        plt.plot(np.arange(1, 11), mean, label=method, marker='o', markersize=5, linewidth=1)
-        plt.fill_between(np.arange(1, 11), min_v, max_v, alpha=.05, linewidth=0)
+        default_args = dict(marker='o', markersize=5, linewidth=1)
+        if method == 'denoise':
+            default_args = dict(linewidth=1, color='darkgray', linestyle='--')
+        if method == 'rand':
+            default_args = dict(linewidth=1, color='gray', linestyle='-.')
+        line = plt.plot(np.arange(1, 11), mean, label=method, **default_args)
+        plt.fill_between(np.arange(1, 11), min_v, max_v, alpha=.05, color = line[0].get_color(), linewidth=0)
     
     plt.xlabel('Epoch')
     plt.ylabel('Accuracy, %')
@@ -168,7 +176,12 @@ if __name__ == "__main__":
     # list_modules('./data/infl/mrpc/i_datainf_mrpc_0.pt', '') #'.*\.layer\.(1[6-9]|2[0-3])\..*\.lora_(A|B)\..*')
     # draw_curve(res_filer='infl_qnli_', out = "./data/auc/qnli.png")    
     # draw_curve(task="qnli", res_folder = "./data/self-infl", module_pattern = '', datasets_folder = './data/datasets', out = "./data/auc/qnli.png")
-    module_pattern_to_name = {".*\\.layer\\.(1[6-9]|2[0-3])\\..*\\.lora_(A|B)\\..*": "last 8", "": "all"}
+    module_pattern_to_name = {".*\\.layer\\.(1[6-9]|2[0-3])\\..*\\.lora_(A|B)\\..*": "last 8", 
+                              "": "all", 
+                              ".*\\.classifier\\..*": "classifier", 
+                              ".*\\.layer\\.([0-9]|1[0-5])\\..*\\.lora_(A|B)\\..*": "first 16", 
+                              "rand": "rand", 
+                              ".*\\.layer\\.[0-8]\\..*\\.lora_(A|B)\\..*": "first 9"}
     for d in ['mrpc', 'qnli', 'qqp', 'sst2']:
         for m in ['datainf', 'hf', 'lissa']:
             draw_ft2_metric(d, infile = f'./data/ft2-infl/{d}.jsonlist', outfile = f'./data/accuracy/{m}/{d}.png', 
