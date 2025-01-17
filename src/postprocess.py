@@ -170,5 +170,6 @@ if __name__ == "__main__":
     # draw_curve(task="qnli", res_folder = "./data/self-infl", module_pattern = '', datasets_folder = './data/datasets', out = "./data/auc/qnli.png")
     module_pattern_to_name = {".*\\.layer\\.(1[6-9]|2[0-3])\\..*\\.lora_(A|B)\\..*": "last 8", "": "all"}
     for d in ['mrpc', 'qnli', 'qqp', 'sst2']:
-        draw_ft2_metric(d, infile = f'./data/ft2-infl/{d}.jsonlist', outfile = f'./data/accuracy/{d}.png', 
-                        influence_method = "lissa", metric = 'accuracy', module_pattern_to_name = module_pattern_to_name)
+        for m in ['datainf', 'hf', 'lissa']:
+            draw_ft2_metric(d, infile = f'./data/ft2-infl/{d}.jsonlist', outfile = f'./data/accuracy/{m}/{d}.png', 
+                            influence_method = m, metric = 'accuracy', module_pattern_to_name = module_pattern_to_name)
