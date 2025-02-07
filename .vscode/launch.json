@@ -26,6 +26,50 @@
             }
         },
         {
+            "name": "Preprocess: CIFAR10",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp_resnet.py",
+            "console": "integratedTerminal",
+            "args": [
+                "preprocess", "--dataset=cifar10"
+            ],
+            "env": {
+                "INFL_SEED": "0",
+                "INFL_CWD": "./data/dev"
+            }
+        },   
+        {
+            "name": "Finetune: ResNet34 on CIFAR10",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp_resnet.py",
+            "console": "integratedTerminal",
+            "stopOnEntry": false,
+            "args": [
+                "finetune", "--dataset-path=./data/dev/d_cifar10_0", "--model-name=resnet34", "--noise-type=worst", "--num-epochs=2"
+            ],
+            "env": {
+                "INFL_SEED": "0",
+                "INFL_CWD": "./data/dev"
+            }
+        },     
+        {
+            "name": "Checkpoint: ResNet34 on CIFAR10",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp_resnet.py",
+            "console": "integratedTerminal",
+            "stopOnEntry": false,
+            "args": [
+                "checkpoint", "--cp=./data/dev/m_cifar10_resnet34_0"
+            ],
+            "env": {
+                "INFL_SEED": "0",
+                "INFL_CWD": "./data/dev"
+            }
+        },                        
+        {
             "name": "Fitetune: GLUE QNLI on DistilRoberta",
             "type": "debugpy",
             "request": "launch",
