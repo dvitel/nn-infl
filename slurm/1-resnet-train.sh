@@ -19,5 +19,5 @@ cwd=/data/dvitel/infl/$dataset
 dataset_path=$cwd/d_$dataset_0
 
 echo "Starting finetuning $dataset $run_id"
-srun --export=ALL,INFL_SEED=$run_id,INFL_CWD=$cwd python ~/infl/src/exp_resent.py finetune --dataset-path=$dataset_path --model-name=resnet34 --noise-type=worst
+srun --export=ALL,INFL_SEED=$run_id,INFL_CWD=$cwd python ~/infl/src/exp_resnet.py finetune --dataset-path=$dataset_path --model-name=resnet34 --noise-type=worst
 echo "Done finetuning $dataset $run_id"

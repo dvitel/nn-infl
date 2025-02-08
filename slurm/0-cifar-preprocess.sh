@@ -20,6 +20,6 @@ cwd=/data/dvitel/infl/$dataset
 mkdir -p $cwd
 
 echo "Starting preprocess $dataset"
-srun --export=ALL,INFL_SEED=0,INFL_CWD=$cwd python ~/infl/src/exp_resnet.py preprocess --dataset=$dataset --noise-path='~/infl/datasets/cifar-noise/CIFAR-10_human.pt' --cache-dir=$cwd
+srun --export=ALL,INFL_SEED=0,INFL_CWD=$cwd python ~/infl/src/exp_resnet.py preprocess --dataset=$dataset --noise-path='/home/d/dvitel/infl/datasets/cifar-noise/CIFAR-10_human.pt' --cache-dir=$cwd
 echo "Done preprocess $dataset"
 done
