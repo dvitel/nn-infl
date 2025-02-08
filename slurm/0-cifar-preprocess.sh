@@ -17,9 +17,9 @@ dataset=${datasets[$SLURM_ARRAY_TASK_ID]}
 
 cwd=/data/dvitel/infl/$dataset
 
-mkdir -p $dataset_cwd
+mkdir -p $cwd
 
 echo "Starting preprocess $dataset"
-srun --export=ALL,INFL_SEED=0,INFL_CWD=$cwd python ~/infl/src/exp_resnet.py preprocess --dataset=$dataset --noise-path='~/infl/datasets/cifar-noise/CIFAR-10_human.pt' --cache-dir=$dataset_cwd
+srun --export=ALL,INFL_SEED=0,INFL_CWD=$cwd python ~/infl/src/exp_resnet.py preprocess --dataset=$dataset --noise-path='~/infl/datasets/cifar-noise/CIFAR-10_human.pt' --cache-dir=$cwd
 echo "Done preprocess $dataset"
 done
