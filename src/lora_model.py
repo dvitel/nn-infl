@@ -123,6 +123,7 @@ def train_LORA_model(model,
 
 def compute_grads(model, dataloader, device="cuda", bring_to_cpu=False):
     ''' Builds tensor of grads, collected accross the model '''
+    model.eval() # avoid dropout and batchnorm
     module_grads = {}
     num_samples = len(dataloader)
     model.to(device)

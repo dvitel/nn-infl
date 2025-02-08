@@ -8,6 +8,7 @@ import re
 from tqdm import tqdm
 
 from cifar import DatasetSplits, OneDataset
+from influence import compute_accurate_influences, compute_datainf_influences, compute_hessian_free_influences, compute_lissa_influences
 from resnet import ResNet34
 os.environ['HF_HOME'] = os.path.join(os.getcwd(), '.cache')
 import pickle
@@ -170,7 +171,7 @@ def train_model(model: torch.nn.Module, train_dataset: torch.utils.data.Dataset,
     return {"accuracy": validation_accuracy, "train_loss": train_loss}
 
 def finetune(dataset_path: str = "./cifar10", model_name = "resnet34", noise_type = "clean", lr = 0.1, num_epochs = 100, batch_size = 128,
-             num_workers = 4, device = 'cuda'):
+             num_workers = 2, device = 'cuda'):
     ''' Finetune a model on a dataset with noise'''
 
     config = dict(seed = seed, dataset_path = dataset_path, 
@@ -241,9 +242,223 @@ def checkpoint(cp: str = ""):
     print("Loaded model accuracy: ", test_acc)
     pass
 
+def load_checkpoint(cp: str = ""):
+    checkpoint = torch.load(cp, weights_only=True)
+    dataset_name = checkpoint["builder"]["dataset_name"]
+    model_name = checkpoint["builder"]["model_name"]
+    builder_params = checkpoint["builder"]["params"]
+    model_builder_fn = supported_models[dataset_name][model_name]
+    model = model_builder_fn(**builder_params) #empty model build
+    model_state_dict = checkpoint["model_state_dict"]
+    model.load_state_dict(model_state_dict)
+    model.to('cuda')
+    return model, checkpoint
+
+def _compute_grads(model, dataloader, device="cuda", bring_to_cpu=False):
+    ''' Builds tensor of grads, collected accross the model '''
+    model.eval()
+
+    module_grads = {}
+    num_samples = len(dataloader)
+    model.to(device)
+    for k, v in model.named_parameters():
+        grad = torch.empty((num_samples, v.numel()), device=device)
+        module_grads[k] = grad
+    for step, (images, labels) in enumerate(tqdm(dataloader)):
+        inputs = images.to(device)
+        outputs = labels.to(device)
+        model.zero_grad() # zeroing out gradient
+        logits = model(inputs)
+        loss: torch.Tensor = F.cross_entropy(logits, outputs, reduction = 'mean')
+
+        loss.backward()
+        
+        for k, v in model.named_parameters():
+            if k in module_grads:
+                module_grads[k][step] = v.grad.view(-1)
+            else:
+                pass
+    if bring_to_cpu:
+        for k, v in module_grads.items():
+            module_grads[k] = v.cpu()
+            del v
+    return module_grads    
+
+def grads(dataset_name = 'cifar10', model_name: str  = 'resnet34', no_val = False, return_grads = False, config = None):
+    ''' Computes gradients for modules of the model'''
+    if config is None:
+        config_path = os.path.join(cwd, f'c_{dataset_name}_{model_name}_{seed}.json')
+        with open(config_path, 'r') as file:
+            config = json.load(file)
+
+    device = config['device']
+    # model_path = os.path.join(cwd, f'm_{task}_{seed}')
+    model_path = os.path.join(cwd, f'm_{dataset_name}_{model_name}_{seed}')
+    model, checkpoint = load_checkpoint(model_path)
+    dataset_file = checkpoint["training"]["dataset_path"]
+    noise_type = checkpoint["training"]["noise_type"]
+    dataset_splits: DatasetSplits = torch.load(dataset_file, weights_only = False)
+    train_dataset = OneDataset(dataset_splits, noise_type=noise_type, for_training=True)
+    test_dataset = OneDataset(dataset_splits, for_training=False)
+    train_dataloader = torch.utils.data.DataLoader(dataset = train_dataset,
+                                    batch_size = 1,
+                                    num_workers = 2,
+                                    shuffle=False,
+                                    drop_last = False)
+    eval_dataloader = torch.utils.data.DataLoader(dataset = test_dataset,
+                                    batch_size = 1,
+                                    num_workers = 2,
+                                    shuffle=False,
+                                    drop_last = False)
+
+    train_grads = _compute_grads(model, train_dataloader, device=device, bring_to_cpu=not return_grads)
+    if no_val:
+        val_grads = {}
+    else:
+        val_grads = _compute_grads(model, eval_dataloader, device=device, bring_to_cpu=not return_grads)
+
+    if return_grads:
+        return {'train': train_grads, 'validation': val_grads}
+    else:
+        grad_path = os.path.join(cwd, f'g_{dataset_name}_{model_name}_{seed}.pt')
+        torch.save({'train': train_grads, 'validation': val_grads}, grad_path)
+
+influence_methods = \
+    {
+        "hf": compute_hessian_free_influences,
+        "datainf": compute_datainf_influences,
+        "lissa": compute_lissa_influences,
+        "exact": compute_accurate_influences
+    }
+
+def infl(dataset_name = 'cifar10', model_name: str = "resnet34", methods = "datainf,lissa", self_influence = False, with_grads = False):
+    config_path = os.path.join(cwd, f'c_{dataset_name}_{model_name}_{seed}.json')
+    with open(config_path, 'r') as file:
+        config = json.load(file)
+
+    device = config['device']
+
+    if with_grads:
+        gradients = grads(dataset_name = dataset_name, model_name = model_name, return_grads=True, config=config, no_val=self_influence)
+    else:
+        gradients = torch.load(os.path.join(cwd, f'g_{dataset_name}_{model_name}_{seed}.pt'))
+    
+    train_grads = {k:v.to(device) for k, v in gradients['train'].items()}
+
+    if self_influence:
+        val_grads = train_grads
+    else:        
+        val_grads = {k:v.to(device) for k, v in gradients['validation'].items()}
+
+    runtimes = {}
+    influences = {}
+    for infl_method in methods.split(','):
+        if infl_method not in influence_methods:
+            continue
+        # NOTE: not all methods require mean gradients
+        avg_val_grads = {module_name: torch.mean(module_grads, dim=0) for module_name, module_grads in val_grads.items()}
+        method_fn = influence_methods[infl_method]
+        runtine, inf_tensors = method_fn(train_grads, val_grads, avg_val_grads, bring_to_cpu=True)
+        influences[infl_method] = inf_tensors
+        runtimes[infl_method] = runtine
+
+    config["infl_runtimes"] = runtimes
+
+    for infl_method, infls in influences.items():
+        infl_path = os.path.join(cwd, f'i_{infl_method}_{dataset_name}_{model_name}_{seed}.pt')
+        torch.save(infls, infl_path)
+
+    with open(config_path, 'w') as file:
+        json.dump(config, file)
+
+
+def finetune2(dataset_name = 'cifar10', model_name: str = 'resnet34',
+         num_epochs = 100, filter_method='infl', infl_method='datainf', module_pattern='', filter_perc = 0.7):
+    config_path = os.path.join(cwd, f'c_{dataset_name}_{model_name}_{seed}.json')
+    with open(config_path, 'r') as file:
+        config = json.load(file)    
+    config.update(finetune2=dict(num_epochs=num_epochs, filter_method=filter_method,
+                                 infl_method=infl_method, module_pattern=module_pattern, filter_perc=filter_perc))
+    print(f"Finetune with modules: {module_pattern}")
+    device = config['device']
+    lr = config['lr']
+    model = config['model']
+    batch_size = config['batch_size']
+    model_path = os.path.join(cwd, f'm_{dataset_name}_{model_name}_{seed}')
+    checkpoint = torch.load(model_path, weights_only=True)
+    dataset_name = checkpoint["builder"]["dataset_name"]
+    model_name = checkpoint["builder"]["model_name"]
+    builder_params = checkpoint["builder"]["params"]
+    model_builder_fn = supported_models[dataset_name][model_name]
+    model = model_builder_fn(**builder_params) #empty model build
+    noise_type = checkpoint["training"]["noise_type"]
+    dataset_path = os.path.join(cwd, f'd_{dataset_name}_{seed}')
+    dataset_splits: DatasetSplits = torch.load(dataset_path, weights_only = False)
+    if filter_method == "infl":
+        influences = torch.load(os.path.join(cwd, f'i_{infl_method}_{dataset_name}_{model_name}_{seed}.pt'))
+
+        module_names = [] # all modules
+        if module_pattern == '':
+            influence = influences[''].to(device)
+        else:
+            pattern = re.compile(module_pattern)
+            influence = None
+            for module in influences:
+                if pattern.match(module): 
+                    if influence is None:
+                        influence = influences[module].to(device)
+                    else:
+                        influence += influences[module].to(device)
+                    module_names.append(module)
+        config['finetune2']['module_names'] = module_names
+        
+        # fine-tuning models
+        high_to_low_quality = torch.argsort(influence)
+        filter_len = int(filter_perc*len(high_to_low_quality))
+        filtered_indexes = high_to_low_quality[:filter_len].cpu()
+
+        def infl_filter(inputs: torch.Tensor):
+            return inputs[filtered_indexes]
+        filter_fn = infl_filter
+    elif filter_method == 'rand':
+        filtered_indexes = None
+        def rand_filter(inputs: torch.Tensor):
+            nonlocal filtered_indexes
+            if filtered_indexes is None:
+                filter_len = int(filter_perc*inputs.shape[0])
+                filtered_indexes = torch.randperm(inputs.shape[0])[:filter_len]
+            return inputs[filtered_indexes]
+        filter_fn = rand_filter        
+    elif filter_method == 'denoise':
+        noise_type = 'clean'
+        filter_fn = None
+    else:
+        filter_fn = None
+
+    train_dataset = OneDataset(dataset_splits, noise_type=noise_type, for_training=True, filter_fn=filter_fn)
+    test_dataset = OneDataset(dataset_splits, for_training=False)
+
+    train_metrics = \
+        train_model(model, train_dataset, device=device, num_epochs=num_epochs, 
+                    batch_size=batch_size, num_workers=2, lr=lr,
+                    validation_dataset = test_dataset)
+
+    config['finetune2'] = train_metrics
+
+    with open(config_path, 'w') as file:
+        json.dump(config, file)       
+
+    metric_file = os.path.join(cwd, f'metrics.jsonlist')
+    with open(metric_file, "a") as f:                
+        fcntl.flock(f, fcntl.LOCK_EX)
+        f.write(json.dumps({**config, "metrics": train_metrics}) + "\n")
+        fcntl.flock(f, fcntl.LOCK_UN)    
+
+    with torch.no_grad():
+        torch.cuda.empty_cache()
 
 parser = argh.ArghParser()
-parser.add_commands([preprocess, finetune, checkpoint])
+parser.add_commands([preprocess, finetune, checkpoint, grads, infl, finetune2])
 
 if __name__ == '__main__':
     try:

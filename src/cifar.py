@@ -1,6 +1,6 @@
 from __future__ import print_function
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from PIL import Image
 import os
 import os.path
@@ -98,14 +98,15 @@ cifar_transforms = {
 # CIFAR fits into memory, so images are nto loaded from disk
 class OneDataset(data.Dataset):
     ''' Wraps list of dict into dataset '''
-    def __init__(self, dataset_splits: DatasetSplits, default_transform = True, transform = None, noise_type: str = "clean", for_training = True):
+    def __init__(self, dataset_splits: DatasetSplits, default_transform = True, transform = None, noise_type: str = "clean", for_training = True,
+                    filter_fn: Optional[Callable] = None):
         self.dataset_splits = dataset_splits
         self.for_training = for_training
         self.noise_type = noise_type
         self.transform = transform
         self.data = self.dataset_splits.train_data
         self.labels = self.dataset_splits.train_clean_labels
-        self.load_split(self.for_training, default_transform, self.transform, self.noise_type)
+        self.load_split(self.for_training, default_transform, self.transform, self.noise_type, filter_fn = filter_fn)
 
     def chance_noise_type(self, noise_type: str):
         self.noise_type = noise_type
@@ -115,14 +116,17 @@ class OneDataset(data.Dataset):
             else:
                 self.labels = self.dataset_splits.noisy_labels[noise_type]
 
-    def load_split(self, for_training: bool, default_transform = True, transform = None, noise_type: str = "clean"):        
+    def load_split(self, for_training: bool, default_transform = True, transform = None, noise_type: str = "clean",
+                        filter_fn: Optional[Callable] = None): 
+        if filter_fn is None:
+            filter_fn = lambda x: x
         self.for_training = for_training
         self.transform = transform
         if self.transform is None and default_transform:
             self.transform = cifar_transforms[(self.dataset_splits.name, self.for_training)]
         if self.for_training:
-            self.data = self.dataset_splits.train_data
-            self.labels = self.dataset_splits.train_clean_labels
+            self.data = filter_fn(self.dataset_splits.train_data)
+            self.labels = filter_fn(self.dataset_splits.train_clean_labels)
             self.chance_noise_type(noise_type)
         else:
             self.data = self.dataset_splits.test_data
