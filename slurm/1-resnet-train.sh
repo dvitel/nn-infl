@@ -16,7 +16,7 @@ run_id=$SLURM_ARRAY_TASK_ID
 
 cwd=/data/dvitel/infl/$dataset
 
-dataset_path=$cwd/d_$dataset_0
+dataset_path=${cwd}/d_${dataset}_0
 
 echo "Starting finetuning $dataset $run_id"
 srun --export=ALL,INFL_SEED=$run_id,INFL_CWD=$cwd python ~/infl/src/exp_resnet.py finetune --dataset-path=$dataset_path --model-name=resnet34 --noise-type=worst
