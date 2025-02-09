@@ -8,7 +8,7 @@ import re
 from tqdm import tqdm
 
 from cifar import DatasetSplits, OneDataset
-from influence import compute_accurate_influences, compute_datainf_influences, compute_hessian_free_influences, compute_infl_from_model, compute_lissa_influences, datainf_fn, hessian_free_fn, lissa_fn
+from influence import  compute_infl_from_model, datainf_fn, hessian_free_fn, lissa_fn
 from resnet import ResNet34
 os.environ['HF_HOME'] = os.path.join(os.getcwd(), '.cache')
 import pickle
@@ -360,7 +360,8 @@ def infl(dataset_name = 'cifar10', model_name: str = "resnet34", method = "datai
                                         drop_last = False)
 
     method_fn = influence_fns[method]
-    runtine, inf_tensors = compute_infl_from_model(model, train_dataloader, eval_dataloader, device = device, infl_fn=method_fn)
+    runtine, inf_tensors = compute_infl_from_model(model, train_dataloader, eval_dataloader, device = device, infl_fn=method_fn,
+                                                   module_patterns=['layer1\\..*','layer2\\..*','layer3\\..*','layer4\\..*'])
 
     config.setdefault("infl_runtimes", {})[method] = runtine
 
