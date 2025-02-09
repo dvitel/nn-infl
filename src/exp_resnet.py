@@ -8,7 +8,7 @@ import re
 from tqdm import tqdm
 
 from cifar import DatasetSplits, OneDataset
-from influence import compute_accurate_influences, compute_datainf_influences, compute_hessian_free_influences, compute_lissa_influences
+from influence import compute_accurate_influences, compute_datainf_influences, compute_hessian_free_influences, compute_infl_from_model, compute_lissa_influences, datainf_fn, hessian_free_fn, lissa_fn
 from resnet import ResNet34
 os.environ['HF_HOME'] = os.path.join(os.getcwd(), '.cache')
 import pickle
@@ -323,50 +323,49 @@ def grads(dataset_name = 'cifar10', model_name: str  = 'resnet34', no_val = Fals
         grad_path = os.path.join(cwd, f'g_{dataset_name}_{model_name}_{seed}.pt')
         torch.save({'train': train_grads, 'validation': val_grads}, grad_path)
 
-influence_methods = \
+influence_fns = \
     {
-        "hf": compute_hessian_free_influences,
-        "datainf": compute_datainf_influences,
-        "lissa": compute_lissa_influences,
-        "exact": compute_accurate_influences
+        "hf": hessian_free_fn,
+        "datainf": datainf_fn,
+        "lissa": lissa_fn,
+        # "exact": compute_accurate_influences
     }
 
-def infl(dataset_name = 'cifar10', model_name: str = "resnet34", methods = "datainf,lissa", self_influence = False, with_grads = False):
+def infl(dataset_name = 'cifar10', model_name: str = "resnet34", method = "datainf", self_influence = False):
     config_path = os.path.join(cwd, f'c_{dataset_name}_{model_name}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)
 
     device = config['device']
 
-    if with_grads:
-        gradients = grads(dataset_name = dataset_name, model_name = model_name, return_grads=True, config=config, no_val=self_influence)
-    else:
-        gradients = torch.load(os.path.join(cwd, f'g_{dataset_name}_{model_name}_{seed}.pt'))
-    
-    train_grads = {k:v.to(device) for k, v in gradients['train'].items()}
-
+    model_path = os.path.join(cwd, f'm_{dataset_name}_{model_name}_{seed}')
+    model, checkpoint = load_checkpoint(model_path)
+    dataset_file = checkpoint["training"]["dataset_path"]
+    noise_type = checkpoint["training"]["noise_type"]
+    dataset_splits: DatasetSplits = torch.load(dataset_file, weights_only = False)
+    train_dataset = OneDataset(dataset_splits, noise_type=noise_type, for_training=True)
+    train_dataloader = torch.utils.data.DataLoader(dataset = train_dataset,
+                                    batch_size = 1,
+                                    num_workers = 2,
+                                    shuffle=False,
+                                    drop_last = False)
     if self_influence:
-        val_grads = train_grads
-    else:        
-        val_grads = {k:v.to(device) for k, v in gradients['validation'].items()}
+        eval_dataloader = train_dataloader
+    else:
+        test_dataset = OneDataset(dataset_splits, for_training=False)
+        eval_dataloader = torch.utils.data.DataLoader(dataset = test_dataset,
+                                        batch_size = 1,
+                                        num_workers = 2,
+                                        shuffle=False,
+                                        drop_last = False)
 
-    runtimes = {}
-    influences = {}
-    for infl_method in methods.split(','):
-        if infl_method not in influence_methods:
-            continue
-        # NOTE: not all methods require mean gradients
-        avg_val_grads = {module_name: torch.mean(module_grads, dim=0) for module_name, module_grads in val_grads.items()}
-        method_fn = influence_methods[infl_method]
-        runtine, inf_tensors = method_fn(train_grads, val_grads, avg_val_grads, bring_to_cpu=True)
-        influences[infl_method] = inf_tensors
-        runtimes[infl_method] = runtine
+    method_fn = influence_fns[method]
+    runtine, inf_tensors = compute_infl_from_model(model, train_dataloader, eval_dataloader, device = device, infl_fn=method_fn)
 
-    config["infl_runtimes"] = runtimes
+    config.setdefault("infl_runtimes", {})[method] = runtine
 
-    for infl_method, infls in influences.items():
-        infl_path = os.path.join(cwd, f'i_{infl_method}_{dataset_name}_{model_name}_{seed}.pt')
-        torch.save(infls, infl_path)
+    infl_path = os.path.join(cwd, f'i_{method}_{dataset_name}_{model_name}_{seed}.pt')
+    torch.save(inf_tensors, infl_path)
 
     with open(config_path, 'w') as file:
         json.dump(config, file)

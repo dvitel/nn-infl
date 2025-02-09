@@ -1,17 +1,153 @@
+import re
 from time import time
+from typing import Optional
 from tqdm import tqdm
 from collections import defaultdict
 import pandas as pd
 import pickle, os
 import torch
 
-# def avg_grad(self):
-#     ''' For a given set of tensors '''
-#     grad_avg_dict={}
-#     for weight_name in self.val_grad_dict[0]:
-#         self.val_grad_avg_dict[weight_name]=torch.zeros(self.val_grad_dict[0][weight_name].shape)
-#         for val_id in self.val_grad_dict:
-#             self.val_grad_avg_dict[weight_name] += self.val_grad_dict[val_id][weight_name] / self.n_val
+def hessian_free_fn(module_train_grad, module_avg_val_grads):
+    module_train_grad = module_train_grad.reshape(module_train_grad.shape[0], -1)
+    module_avg_val_grads = module_avg_val_grads.reshape(-1)    
+    module_infl_values = module_avg_val_grads * module_train_grad
+    module_infs = module_infl_values.reshape(module_train_grad.shape[0], -1).sum(dim=-1)
+    return module_infs
+
+def datainf_fn(module_train_grad, module_avg_val_grads, lambda_const_param=10):
+    module_train_grad = module_train_grad.reshape(module_train_grad.shape[0], -1)
+    module_avg_val_grads = module_avg_val_grads.reshape(-1)
+    module_train_grad_squares = module_train_grad ** 2
+    lambda_const = torch.mean(module_train_grad_squares) / lambda_const_param
+
+    C_tmp_values = module_avg_val_grads * module_train_grad
+    nom_values = torch.sum(C_tmp_values, dim=-1)
+    denom_values = lambda_const + torch.sum(module_train_grad_squares, dim=-1)
+    C_tmp = nom_values / denom_values
+
+    C_tmp_grad_values = C_tmp.view(-1, 1) * module_train_grad
+
+    const_val = lambda_const * module_train_grad.shape[0]
+
+    module_hvp_values = (module_avg_val_grads - C_tmp_grad_values) / const_val
+
+    module_hvp = torch.sum(module_hvp_values, dim=0)
+
+    module_infl_values = module_hvp * module_train_grad
+    module_infls = module_infl_values.sum(dim=-1)
+    return module_infls
+
+def lissa_fn(module_train_grad, module_avg_val_grads, lambda_const_param=10, n_iteration=10, alpha_const=1.):
+    module_train_grad = module_train_grad.reshape(module_train_grad.shape[0], -1)
+    module_avg_val_grads = module_avg_val_grads.reshape(-1)    
+    n_train = module_train_grad.shape[0]
+    module_train_grad_squares = module_train_grad ** 2
+    lambda_const = torch.mean(module_train_grad_squares) / lambda_const_param
+
+    # hvp computation
+    running_hvp = module_avg_val_grads
+    for _ in range(n_iteration):
+        hvp_tmp_values = module_train_grad * running_hvp
+        hvp_tmp_sum = torch.sum(hvp_tmp_values, dim=-1)
+        hvp_tmp_0 = (hvp_tmp_sum.view(-1, 1) * module_train_grad - lambda_const * running_hvp) / n_train
+        hvp_tmp = torch.sum(hvp_tmp_0, dim=0)
+        running_hvp = module_avg_val_grads + running_hvp - alpha_const * hvp_tmp
+
+    module_infl_values = running_hvp * module_train_grad
+    module_infls = module_infl_values.sum(dim=-1)
+    return module_infls
+
+def compute_infl_from_model(model: torch.nn.Module, train_dataloader: torch.utils.data.DataLoader, 
+                                    val_dataloader: Optional[torch.utils.data.DataLoader] = None, device = "cuda",
+                                    module_patterns: list[str] = [], return_all = False, filter_list = None,
+                                    infl_fn = hessian_free_fn):
+    ''' Use this for large models - does not require to store all gradients in memory, but
+        computes influence on request '''
+    
+    if val_dataloader is None:
+        val_dataloader = train_dataloader
+
+    start_time = time()
+    
+    patterns = [ (re.compile(p), p) for p in module_patterns ]
+    model.to(device)
+    model.eval()
+
+    module_infls = {}
+    num_val_samples = len(val_dataloader)
+    num_train_samples = len(train_dataloader)
+    module_infls[''] = torch.zeros(num_train_samples, device = device, dtype=torch.float)
+    module_groups = {}
+    active_modules = {}
+    # filter_list = ['lora_A', 'lora_B', 'modules_to_save.default.out_proj.weight']
+    for module_name, module_params in model.named_parameters():
+        if not module_params.requires_grad:
+            continue
+        if filter_list is not None and not any(f in module_name for f in filter_list):
+            continue
+        active_modules[module_name] = module_params
+        for p, p_str in patterns:
+            if p.match(module_name):
+                module_groups.setdefault(module_name, []).append(p_str)
+                if p_str not in module_infls:
+                    module_infls[p_str] = torch.zeros(num_train_samples, device = device, dtype=module_params.dtype)
+
+    model.zero_grad()
+    for step, batch in enumerate(tqdm(val_dataloader)):
+        if type(batch) == list:
+            inputs, labels = batch
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+            # model.zero_grad() # we aggregate all gradients in .grad
+            logits = model(inputs)
+            loss = torch.nn.functional.cross_entropy(logits, labels)
+            loss.backward()
+        else:
+            batch.to(device)
+            outputs = model(**batch)
+            loss = outputs.loss
+            loss.backward()
+
+    avg_val_grad = { module_name: module_params.grad / num_val_samples for module_name, module_params in active_modules.items() }
+        
+    for module_name, module_params in active_modules.items():
+        for module_params_i in active_modules.values():
+            module_params_i.requires_grad = False
+        module_params.requires_grad = True                
+        module_avg_val_grad = avg_val_grad[module_name]
+
+        module_infl_values = torch.zeros((num_train_samples, *module_params.shape), device = device, dtype=module_params.dtype)
+        module_train_grad = torch.zeros((num_train_samples, *module_params.shape), device = device, dtype=module_params.dtype)
+        for step, batch in enumerate(tqdm(train_dataloader)):
+            model.zero_grad() # we aggregate all gradients in .grad
+            if type(batch) == list:
+                inputs, labels = batch
+                inputs = inputs.to(device)
+                labels = labels.to(device)
+                logits = model(inputs)
+                loss = torch.nn.functional.cross_entropy(logits, labels)
+                loss.backward()
+            else:
+                batch.to(device)
+                outputs = model(**batch)
+                loss = outputs.loss
+                loss.backward()                
+
+            module_train_grad[step] = module_params.grad
+
+        module_infls_one = infl_fn(module_train_grad, module_avg_val_grad)
+        module_infls[''] += module_infls_one
+        for p_str in module_groups.get(module_name, []):
+            module_infls[p_str] += module_infls_one
+        if return_all:
+            module_infls[module_name] = module_infls_one
+    for module_params_i in active_modules.values():
+        module_params_i.requires_grad = True
+    for infl in module_infls.values():
+        infl.neg_()         
+    timespan = time() - start_time
+    return timespan, module_infls
+
 
 def compute_influence_from_hvp(modules_hvp, modules_grad, bring_to_cpu=False):
     if_tmp_dict = {}

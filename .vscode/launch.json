@@ -83,7 +83,22 @@
                 "INFL_SEED": "0",
                 "INFL_CWD": "./data/dev"
             }
-        },                           
+        },         
+        {
+            "name": "Infl: ResNet34 on CIFAR10",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp_resnet.py",
+            "console": "integratedTerminal",
+            "stopOnEntry": false,
+            "args": [
+                "infl", "--dataset-name=cifar10", "--model-name=resnet34", "--method=hf"
+            ],
+            "env": {
+                "INFL_SEED": "0",
+                "INFL_CWD": "./data/dev"
+            }
+        },                            
         {
             "name": "Fitetune: GLUE QNLI on DistilRoberta",
             "type": "debugpy",
@@ -119,7 +134,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "infl", "--task=qnli", "--methods=hf,datainf,lissa,exact", "--with-grads", "--self-influence"
+                "infl", "--task=qnli", "--methods=lissa", "--with-grads"
             ],
             "env": {
                 "INFL_SEED": "0",

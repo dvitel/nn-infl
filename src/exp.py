@@ -10,7 +10,7 @@ import random
 import argh
 import numpy as np
 from lora_model import build_LORA_model, train_LORA_model, load_pretrained_LORA_model, compute_grads
-from influence import IFEngine, compute_hessian_free_influences, compute_datainf_influences, compute_lissa_influences, compute_accurate_influences
+from influence import IFEngine, compute_hessian_free_influences, compute_datainf_influences, compute_infl_from_model, compute_lissa_influences, compute_accurate_influences, datainf_fn, lissa_fn
 import torch
 from transformers import AutoTokenizer, DataCollatorWithPadding
 from datasets import load_dataset, load_from_disk
@@ -24,6 +24,9 @@ np.random.seed(seed)
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
+
+# torch.backends.cudnn.deterministic = True
+# torch.backends.cudnn.benchmark = False
 
 task_to_keys = {
     "cola": ("sentence", None),
@@ -149,11 +152,11 @@ def build_loaders(dataset_path, tokenizer_name, batch_size = 32, shuffle_train =
     tokenizer = load_tokenizer(tokenizer_name)
     collator = DataCollatorWithPadding(tokenizer=tokenizer, padding="longest", return_tensors="pt")  
         
-    train_dataloader = DataLoader(trainset,
+    train_dataloader = DataLoader(trainset, #.select(range(100)),
                                   shuffle=shuffle_train, 
                                   collate_fn=collator,
                                   batch_size=batch_size)
-    eval_dataloader = DataLoader(valset,
+    eval_dataloader = DataLoader(valset, #.select(range(100)),
                                  shuffle=False, 
                                  collate_fn=collator, 
                                  batch_size=batch_size)
@@ -270,6 +273,18 @@ def infl(task = 'mrpc', methods = "datainf,lissa", self_influence = False, with_
         avg_val_grads = {module_name: torch.mean(module_grads, dim=0) for module_name, module_grads in val_grads.items()}
         method_fn = influence_methods[infl_method]
         runtine, inf_tensors = method_fn(train_grads, val_grads, avg_val_grads, bring_to_cpu=True)
+                
+        # model_path = os.path.join(cwd, f'm_{task}_{seed}')
+        # lora_model = load_pretrained_LORA_model(model_name_or_path=model_path)
+        # dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
+        # train_dataloader, eval_dataloader, _ = \
+        #     build_loaders(dataset_path, config['tokenizer_name'], batch_size=1, 
+        #                     shuffle_train=False, val_size=500)
+
+        # inf_tensors2 = compute_infl_from_model(lora_model, train_dataloader, eval_dataloader, device=device, infl_fn=lissa_fn)
+        # pass
+        
+        
         influences[infl_method] = inf_tensors
         runtimes[infl_method] = runtine
 
