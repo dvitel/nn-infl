@@ -92,6 +92,53 @@ def compute_infl_from_model(model: torch.nn.Module, train_dataloader: torch.util
                 if p_str not in module_infls:
                     module_infls[p_str] = torch.zeros(num_train_samples, device = device, dtype=module_params.dtype)
 
+    # model.zero_grad()
+
+    # def compute_loss_func(params, batch):
+    #     if type(batch) == list:
+    #         output_is_logits = True
+    #         inputs, labels = batch 
+    #         args = (inputs,)
+    #         kwargs = {}
+    #     else:
+    #         output_is_logits = False
+    #         labels = batch.pop("labels")
+    #         args = ()
+    #         kwargs = batch
+    #     output = torch.func.functional_call(model, params, args, kwargs=kwargs)
+    #     if output_is_logits:
+    #         logits = output
+    #     else:
+    #         logits = output.logits
+    #     loss = torch.nn.functional.cross_entropy(logits, labels, reduction='none')
+    #     return loss
+
+    # loss2_jac_fn = torch.func.jacrev(compute_loss_func, has_aux=False)
+    # # trainable_params = {nm:pval for nm, pval in model.named_parameters() if pval.requires_grad}
+
+    # new_dataloader = torch.utils.data.DataLoader(val_dataloader.dataset, batch_size=16, shuffle=False)
+
+    # for step, batch in enumerate(tqdm(new_dataloader)):
+    #     if type(batch) == list:
+    #         inputs, labels = batch
+    #         inputs = inputs.to(device)
+    #         labels = labels.to(device)
+    #         batch = [inputs, labels]
+    #     else:
+    #         batch.to(device)
+    #     # labels = batch.pop("labels")
+        
+    #     with torch.no_grad():
+    #         loss2_jacobian = loss2_jac_fn(active_modules, batch)
+        
+    #     for nm, pval in active_modules.items():
+    #         if pval.grad is not None:
+    #             pval.grad += loss2_jacobian[nm].sum(dim=0)
+    #         else:
+    #             pval.grad = loss2_jacobian[nm].sum(dim=0)
+
+    # avg_val_grad2 = { module_name: module_params.grad / num_val_samples for module_name, module_params in active_modules.items() }          
+    
     model.zero_grad()
     for step, batch in enumerate(tqdm(val_dataloader)):
         if type(batch) == list:
