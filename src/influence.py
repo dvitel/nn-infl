@@ -8,15 +8,12 @@ import pickle, os
 import torch
 
 def hessian_free_fn(module_train_grad, module_avg_val_grads):
-    module_train_grad = module_train_grad.reshape(module_train_grad.shape[0], -1)
-    module_avg_val_grads = module_avg_val_grads.reshape(-1)    
     module_infl_values = module_avg_val_grads * module_train_grad
-    module_infs = module_infl_values.reshape(module_train_grad.shape[0], -1).sum(dim=-1)
+    module_infs = module_infl_values.sum(dim=-1)
+    del module_infl_values
     return module_infs
 
-def datainf_fn(module_train_grad, module_avg_val_grads, lambda_const_param=10):
-    module_train_grad = module_train_grad.reshape(module_train_grad.shape[0], -1)
-    module_avg_val_grads = module_avg_val_grads.reshape(-1)
+def datainf_fn(module_train_grad, module_avg_val_grads, lambda_const_param=10):    
     module_train_grad_squares = module_train_grad ** 2
     lambda_const = torch.mean(module_train_grad_squares) / lambda_const_param
 
@@ -35,11 +32,10 @@ def datainf_fn(module_train_grad, module_avg_val_grads, lambda_const_param=10):
 
     module_infl_values = module_hvp * module_train_grad
     module_infls = module_infl_values.sum(dim=-1)
+    del module_hvp, module_train_grad_squares, C_tmp_values, nom_values, denom_values, C_tmp, C_tmp_grad_values, module_hvp_values, module_infl_values
     return module_infls
 
 def lissa_fn(module_train_grad, module_avg_val_grads, lambda_const_param=10, n_iteration=10, alpha_const=1.):
-    module_train_grad = module_train_grad.reshape(module_train_grad.shape[0], -1)
-    module_avg_val_grads = module_avg_val_grads.reshape(-1)    
     n_train = module_train_grad.shape[0]
     module_train_grad_squares = module_train_grad ** 2
     lambda_const = torch.mean(module_train_grad_squares) / lambda_const_param
@@ -52,9 +48,11 @@ def lissa_fn(module_train_grad, module_avg_val_grads, lambda_const_param=10, n_i
         hvp_tmp_0 = (hvp_tmp_sum.view(-1, 1) * module_train_grad - lambda_const * running_hvp) / n_train
         hvp_tmp = torch.sum(hvp_tmp_0, dim=0)
         running_hvp = module_avg_val_grads + running_hvp - alpha_const * hvp_tmp
+        del hvp_tmp_values, hvp_tmp_sum, hvp_tmp_0, hvp_tmp
 
     module_infl_values = running_hvp * module_train_grad
     module_infls = module_infl_values.sum(dim=-1)
+    del module_train_grad_squares, running_hvp, module_infl_values
     return module_infls
 
 def compute_infl_from_model(model: torch.nn.Module, train_dataloader: torch.utils.data.DataLoader, 
@@ -155,16 +153,17 @@ def compute_infl_from_model(model: torch.nn.Module, train_dataloader: torch.util
             loss = outputs.loss
             loss.backward()
 
-    avg_val_grad = { module_name: module_params.grad / num_val_samples for module_name, module_params in active_modules.items() }
+    avg_val_grad = {}
+    
+    for module_name, module_params in active_modules.items():
+        avg_val_grad[module_name] = module_params.grad.reshape(-1) / num_val_samples
         
     for module_name, module_params in active_modules.items():
         for module_params_i in active_modules.values():
             module_params_i.requires_grad = False
-        module_params.requires_grad = True                
-        module_avg_val_grad = avg_val_grad[module_name]
+        module_params.requires_grad = True                        
 
-        module_infl_values = torch.zeros((num_train_samples, *module_params.shape), device = device, dtype=module_params.dtype)
-        module_train_grad = torch.zeros((num_train_samples, *module_params.shape), device = device, dtype=module_params.dtype)
+        module_train_grad = torch.zeros((num_train_samples, module_params.numel()), device = device, dtype=module_params.dtype)
         for step, batch in enumerate(tqdm(train_dataloader)):
             model.zero_grad() # we aggregate all gradients in .grad
             if type(batch) == list:
@@ -180,14 +179,15 @@ def compute_infl_from_model(model: torch.nn.Module, train_dataloader: torch.util
                 loss = outputs.loss
                 loss.backward()                
 
-            module_train_grad[step] = module_params.grad
+            module_train_grad[step] = module_params.grad.reshape(-1)
 
-        module_infls_one = infl_fn(module_train_grad, module_avg_val_grad)
+        module_infls_one = infl_fn(module_train_grad, avg_val_grad[module_name])
         module_infls[''] += module_infls_one
         for p_str in module_groups.get(module_name, []):
             module_infls[p_str] += module_infls_one
         if return_all:
-            module_infls[module_name] = module_infls_one
+            module_infls[module_name] = module_infls_one.clone()
+        del module_infls_one, module_train_grad
     for module_params_i in active_modules.values():
         module_params_i.requires_grad = True
     for infl in module_infls.values():
