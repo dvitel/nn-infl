@@ -123,6 +123,11 @@ def compute_infl_from_model(model: torch.nn.Module, train_dataset: OneDataset,
     active_module_list = list(active_modules.keys())
     active_module_list.sort(key=lambda x: active_modules[x].numel(), reverse=True)
 
+    total_memory = (torch.cuda.get_device_properties(device).total_memory / (1024.0 ** 3) - 0.5)
+
+    adjusted_sizes = [*[ 100*(i + 1) for i in range(10)], *[ 1000*(i + 1) for i in range(10)]]        
+    adjusted_sizes_pairs = [(adjusted_sizes[i], adjusted_sizes[i+1]) for i in range(0, len(adjusted_sizes), 2)]
+
     while True:
         total_numels = 0        
         current_active_modules = {}
@@ -146,6 +151,12 @@ def compute_infl_from_model(model: torch.nn.Module, train_dataset: OneDataset,
             module_params_i.requires_grad = False
         for module_params_i in current_active_modules.values():
             module_params_i.requires_grad = True
+
+        prec_size = total_memory * (1024. ** 3) / (total_numels * 8)
+
+        adjusted_size = next((size1 for size1, size2 in adjusted_sizes_pairs if size1 <= prec_size < size2), None)
+
+        train_dataset.load_next_dataset(start_index=0, size = adjusted_size)  
 
         train_dataloader = torch.utils.data.DataLoader(dataset = train_dataset,
                                             batch_size = 1,

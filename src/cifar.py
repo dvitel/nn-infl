@@ -151,17 +151,20 @@ class OneDataset(data.Dataset):
         self.original_size = size 
         self.size = self.end_index - self.start_index
 
-    def load_next_dataset(self):
+    def load_next_dataset(self, start_index = None, size = None):
         has_next = True
-        start_index = self.end_index
+        if start_index is None:
+            start_index = self.end_index
         if start_index >= len(self.labels):
             has_next = False
             start_index = 0
-        size = self.original_size
+        if size is None:
+            size = self.original_size
         self.start_index = start_index
         self.end_index = (start_index + size) if size is not None else len(self.labels)
         self.end_index = min(self.end_index, len(self.data))
         self.size = self.end_index - self.start_index
+        self.original_size = size
         return has_next
 
     def __len__(self):
