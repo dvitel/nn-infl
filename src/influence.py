@@ -126,7 +126,7 @@ def compute_infl_from_model(model: torch.nn.Module, train_dataset: OneDataset,
     total_memory = (torch.cuda.get_device_properties(device).total_memory / (1024.0 ** 3) - 1)
 
     adjusted_sizes = [*[ 100*(i + 1) for i in range(10)], *[ 1000*(i + 1) for i in range(10)]]        
-    adjusted_sizes_pairs = list(enumerate(adjusted_size))
+    adjusted_sizes_pairs = list(enumerate(adjusted_sizes))
 
     while True:
         total_numels = 0        
