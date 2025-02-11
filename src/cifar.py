@@ -99,14 +99,25 @@ cifar_transforms = {
 class OneDataset(data.Dataset):
     ''' Wraps list of dict into dataset '''
     def __init__(self, dataset_splits: DatasetSplits, default_transform = True, transform = None, noise_type: str = "clean", for_training = True,
-                    filter_fn: Optional[Callable] = None):
+                    filter_fn: Optional[Callable] = None, start_index = 0, size = None, max_size = None):
         self.dataset_splits = dataset_splits
         self.for_training = for_training
         self.noise_type = noise_type
         self.transform = transform
         self.data = self.dataset_splits.train_data
         self.labels = self.dataset_splits.train_clean_labels
-        self.load_split(self.for_training, default_transform, self.transform, self.noise_type, filter_fn = filter_fn)
+        self.start_index = start_index
+        self.end_index = (start_index + size) if size is not None else len(self.labels)
+        self.end_index = min(self.end_index, len(self.data))
+        self.original_size = size 
+        self.size = self.end_index - self.start_index
+        if max_size is not None:
+            self.data = self.data[:max_size]
+            self.labels = self.labels[:max_size]
+        # self.cur_index = self.start_index
+        self.load_split(self.for_training, default_transform, self.transform, 
+                        self.noise_type, filter_fn = filter_fn, start_index = start_index, size = size, 
+                        max_size = max_size)
 
     def chance_noise_type(self, noise_type: str):
         self.noise_type = noise_type
@@ -117,7 +128,7 @@ class OneDataset(data.Dataset):
                 self.labels = self.dataset_splits.noisy_labels[noise_type]
 
     def load_split(self, for_training: bool, default_transform = True, transform = None, noise_type: str = "clean",
-                        filter_fn: Optional[Callable] = None): 
+                        filter_fn: Optional[Callable] = None, start_index = 0, size = None, max_size = None): 
         if filter_fn is None:
             filter_fn = lambda x: x
         self.for_training = for_training
@@ -131,13 +142,38 @@ class OneDataset(data.Dataset):
         else:
             self.data = self.dataset_splits.test_data
             self.labels = self.dataset_splits.test_labels
+        if max_size is not None:
+            self.data = self.data[:max_size]
+            self.labels = self.labels[:max_size]            
+        self.start_index = start_index
+        self.end_index = (start_index + size) if size is not None else len(self.labels)
+        self.end_index = min(self.end_index, len(self.data))
+        self.original_size = size 
+        self.size = self.end_index - self.start_index
+
+    def load_next_dataset(self):
+        has_next = True
+        start_index = self.end_index
+        if start_index >= len(self.labels):
+            has_next = False
+            start_index = 0
+        size = self.original_size
+        self.start_index = start_index
+        self.end_index = (start_index + size) if size is not None else len(self.labels)
+        self.end_index = min(self.end_index, len(self.data))
+        self.size = self.end_index - self.start_index
+        return has_next
 
     def __len__(self):
+        return self.size
+    
+    def total_len(self):
         return len(self.labels)
 
     def __getitem__(self, idx):
 
-        img, target = self.data[idx], self.labels[idx]
+        idx2 = self.start_index + idx
+        img, target = self.data[idx2], self.labels[idx2]
     
         # doing this so that it is consistent with all other datasets
         # to return a PIL Image

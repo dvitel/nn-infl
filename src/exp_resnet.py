@@ -343,24 +343,14 @@ def infl(dataset_name = 'cifar10', model_name: str = "resnet34", method = "datai
     dataset_file = checkpoint["training"]["dataset_path"]
     noise_type = checkpoint["training"]["noise_type"]
     dataset_splits: DatasetSplits = torch.load(dataset_file, weights_only = False)
-    train_dataset = OneDataset(dataset_splits, noise_type=noise_type, for_training=True)
-    train_dataloader = torch.utils.data.DataLoader(dataset = train_dataset,
-                                    batch_size = 1,
-                                    num_workers = 2,
-                                    shuffle=False,
-                                    drop_last = False)
+    train_dataset = OneDataset(dataset_splits, noise_type=noise_type, for_training=True, size = 10000) # max_size = 1000)
     if self_influence:
-        eval_dataloader = train_dataloader
+        test_dataset = train_dataset
     else:
-        test_dataset = OneDataset(dataset_splits, for_training=False)
-        eval_dataloader = torch.utils.data.DataLoader(dataset = test_dataset,
-                                        batch_size = 1,
-                                        num_workers = 2,
-                                        shuffle=False,
-                                        drop_last = False)
+        test_dataset = OneDataset(dataset_splits, for_training=False) #, max_size=1000)
 
     method_fn = influence_fns[method]
-    runtine, inf_tensors = compute_infl_from_model(model, train_dataloader, eval_dataloader, device = device, infl_fn=method_fn,
+    runtine, inf_tensors = compute_infl_from_model(model, train_dataset, test_dataset, device = device, infl_fn=method_fn,
                                                    module_patterns=['layer1\\..*','layer2\\..*','layer3\\..*','layer4\\..*'])
 
     config.setdefault("infl_runtimes", {})[method] = runtine

@@ -7,6 +7,8 @@ import pandas as pd
 import pickle, os
 import torch
 
+from cifar import OneDataset
+
 def hessian_free_fn(module_train_grad, module_avg_val_grads):
     module_infl_values = module_avg_val_grads * module_train_grad
     module_infs = module_infl_values.sum(dim=-1)
@@ -55,15 +57,16 @@ def lissa_fn(module_train_grad, module_avg_val_grads, lambda_const_param=10, n_i
     del module_train_grad_squares, running_hvp, module_infl_values
     return module_infls
 
-def compute_infl_from_model(model: torch.nn.Module, train_dataloader: torch.utils.data.DataLoader, 
-                                    val_dataloader: Optional[torch.utils.data.DataLoader] = None, device = "cuda",
-                                    module_patterns: list[str] = [], return_all = False, filter_list = None,
+def print_tensors_in_use(device="cuda"):
+    summary = torch.cuda.memory_summary(device=device, abbreviated=False)
+    print(summary)
+
+def compute_infl_from_model(model: torch.nn.Module, train_dataset: OneDataset, 
+                                    val_dataset: OneDataset, device = "cuda",
+                                    module_patterns: list[str] = [], filter_list = None,
                                     infl_fn = hessian_free_fn):
     ''' Use this for large models - does not require to store all gradients in memory, but
         computes influence on request '''
-    
-    if val_dataloader is None:
-        val_dataloader = train_dataloader
 
     start_time = time()
     
@@ -72,9 +75,9 @@ def compute_infl_from_model(model: torch.nn.Module, train_dataloader: torch.util
     model.eval()
 
     module_infls = {}
-    num_val_samples = len(val_dataloader)
-    num_train_samples = len(train_dataloader)
-    module_infls[''] = torch.zeros(num_train_samples, device = device, dtype=torch.float)
+    num_val_samples = len(val_dataset)
+    total_num_train_samples = train_dataset.total_len()
+    module_infls[''] = torch.zeros(total_num_train_samples, device = device, dtype=torch.float)
     module_groups = {}
     active_modules = {}
     # filter_list = ['lora_A', 'lora_B', 'modules_to_save.default.out_proj.weight']
@@ -88,57 +91,16 @@ def compute_infl_from_model(model: torch.nn.Module, train_dataloader: torch.util
             if p.match(module_name):
                 module_groups.setdefault(module_name, []).append(p_str)
                 if p_str not in module_infls:
-                    module_infls[p_str] = torch.zeros(num_train_samples, device = device, dtype=module_params.dtype)
+                    module_infls[p_str] = torch.zeros(total_num_train_samples, device = device, dtype=module_params.dtype)
 
-    # model.zero_grad()
-
-    # def compute_loss_func(params, batch):
-    #     if type(batch) == list:
-    #         output_is_logits = True
-    #         inputs, labels = batch 
-    #         args = (inputs,)
-    #         kwargs = {}
-    #     else:
-    #         output_is_logits = False
-    #         labels = batch.pop("labels")
-    #         args = ()
-    #         kwargs = batch
-    #     output = torch.func.functional_call(model, params, args, kwargs=kwargs)
-    #     if output_is_logits:
-    #         logits = output
-    #     else:
-    #         logits = output.logits
-    #     loss = torch.nn.functional.cross_entropy(logits, labels, reduction='none')
-    #     return loss
-
-    # loss2_jac_fn = torch.func.jacrev(compute_loss_func, has_aux=False)
-    # # trainable_params = {nm:pval for nm, pval in model.named_parameters() if pval.requires_grad}
-
-    # new_dataloader = torch.utils.data.DataLoader(val_dataloader.dataset, batch_size=16, shuffle=False)
-
-    # for step, batch in enumerate(tqdm(new_dataloader)):
-    #     if type(batch) == list:
-    #         inputs, labels = batch
-    #         inputs = inputs.to(device)
-    #         labels = labels.to(device)
-    #         batch = [inputs, labels]
-    #     else:
-    #         batch.to(device)
-    #     # labels = batch.pop("labels")
-        
-    #     with torch.no_grad():
-    #         loss2_jacobian = loss2_jac_fn(active_modules, batch)
-        
-    #     for nm, pval in active_modules.items():
-    #         if pval.grad is not None:
-    #             pval.grad += loss2_jacobian[nm].sum(dim=0)
-    #         else:
-    #             pval.grad = loss2_jacobian[nm].sum(dim=0)
-
-    # avg_val_grad2 = { module_name: module_params.grad / num_val_samples for module_name, module_params in active_modules.items() }          
     
+    val_dataloader = torch.utils.data.DataLoader(dataset = val_dataset,
+                                        batch_size = 1,
+                                        num_workers = 2,
+                                        shuffle=False,
+                                        drop_last = False)        
     model.zero_grad()
-    for step, batch in enumerate(tqdm(val_dataloader)):
+    for batch in tqdm(val_dataloader):
         if type(batch) == list:
             inputs, labels = batch
             inputs = inputs.to(device)
@@ -159,35 +121,47 @@ def compute_infl_from_model(model: torch.nn.Module, train_dataloader: torch.util
         avg_val_grad[module_name] = module_params.grad.reshape(-1) / num_val_samples
         
     for module_name, module_params in active_modules.items():
+        allocated_memory = round(torch.cuda.memory_allocated() / (1024. ** 3), 2)
+        reserved_memory = round(torch.cuda.memory_reserved() / (1024. ** 3), 2)
+        el_mem = round(((total_num_train_samples * module_params.numel()) * 8. / (1024.0 ** 3)), 2)
+        print(f">> Infl of {module_name} [{module_params.numel()} els, {el_mem}GB].\nCUDA MEM: {allocated_memory}GB, reserved {reserved_memory}GB")
+        # print_tensors_in_use(device=device)
         for module_params_i in active_modules.values():
             module_params_i.requires_grad = False
         module_params.requires_grad = True                        
 
-        module_train_grad = torch.zeros((num_train_samples, module_params.numel()), device = device, dtype=module_params.dtype)
-        for step, batch in enumerate(tqdm(train_dataloader)):
-            model.zero_grad() # we aggregate all gradients in .grad
-            if type(batch) == list:
-                inputs, labels = batch
-                inputs = inputs.to(device)
-                labels = labels.to(device)
-                logits = model(inputs)
-                loss = torch.nn.functional.cross_entropy(logits, labels)
-                loss.backward()
-            else:
-                batch.to(device)
-                outputs = model(**batch)
-                loss = outputs.loss
-                loss.backward()                
+        train_dataloader = torch.utils.data.DataLoader(dataset = train_dataset,
+                                            batch_size = 1,
+                                            num_workers = 2,
+                                            shuffle=False,
+                                            drop_last = False)       
+        has_dataset = True 
+        while has_dataset:  
+            module_train_grad = torch.zeros((len(train_dataset), module_params.numel()), device = device, dtype=module_params.dtype)
+            for step, batch in enumerate(tqdm(train_dataloader)):
+                model.zero_grad() # we aggregate all gradients in .grad
+                if type(batch) == list:
+                    inputs, labels = batch
+                    inputs = inputs.to(device)
+                    labels = labels.to(device)
+                    logits = model(inputs)
+                    loss = torch.nn.functional.cross_entropy(logits, labels)
+                    loss.backward()
+                else:
+                    batch.to(device)
+                    outputs = model(**batch)
+                    loss = outputs.loss
+                    loss.backward()  
 
-            module_train_grad[step] = module_params.grad.reshape(-1)
+                module_train_grad[step] = module_params.grad.reshape(-1)
 
-        module_infls_one = infl_fn(module_train_grad, avg_val_grad[module_name])
-        module_infls[''] += module_infls_one
-        for p_str in module_groups.get(module_name, []):
-            module_infls[p_str] += module_infls_one
-        if return_all:
-            module_infls[module_name] = module_infls_one.clone()
-        del module_infls_one, module_train_grad
+            module_infls_one = infl_fn(module_train_grad, avg_val_grad[module_name])
+            module_infls[''][train_dataset.start_index:train_dataset.end_index] += module_infls_one
+            for p_str in module_groups.get(module_name, []):
+                module_infls[p_str][train_dataset.start_index:train_dataset.end_index] += module_infls_one
+            del module_infls_one, module_train_grad
+            has_dataset = train_dataset.load_next_dataset()
+        model.zero_grad()
     for module_params_i in active_modules.values():
         module_params_i.requires_grad = True
     for infl in module_infls.values():
