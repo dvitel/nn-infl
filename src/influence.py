@@ -64,7 +64,7 @@ def print_tensors_in_use(device="cuda"):
 def compute_infl_from_model(model: torch.nn.Module, train_dataset: OneDataset, 
                                     val_dataset: OneDataset, device = "cuda",
                                     module_patterns: list[str] = [], filter_list = None,
-                                    infl_fn = hessian_free_fn):
+                                    infl_fn = hessian_free_fn, max_num_el = 10000):
     ''' Use this for large models - does not require to store all gradients in memory, but
         computes influence on request '''
 
@@ -119,16 +119,33 @@ def compute_infl_from_model(model: torch.nn.Module, train_dataset: OneDataset,
     
     for module_name, module_params in active_modules.items():
         avg_val_grad[module_name] = module_params.grad.reshape(-1) / num_val_samples
-        
-    for module_name, module_params in active_modules.items():
+
+    active_module_list = list(active_modules.keys())
+    active_module_list.sort(key=lambda x: active_modules[x].numel(), reverse=True)
+
+    while True:
+        total_numels = 0        
+        current_active_modules = {}
+        while len(active_module_list) > 0:
+            module_name = active_module_list[0]
+            module_params = active_modules[module_name]
+            cur_numel = module_params.numel()
+            if (total_numels + cur_numel > max_num_el) and (total_numels > 0):
+                break 
+            current_active_modules[module_name] = module_params
+            total_numels += cur_numel
+            active_module_list.pop(0)
+        if len(current_active_modules) == 0:
+            break
         allocated_memory = round(torch.cuda.memory_allocated() / (1024. ** 3), 2)
         reserved_memory = round(torch.cuda.memory_reserved() / (1024. ** 3), 2)
-        el_mem = round(((total_num_train_samples * module_params.numel()) * 8. / (1024.0 ** 3)), 2)
-        print(f">> Infl of {module_name} [{module_params.numel()} els, {el_mem}GB].\nCUDA MEM: {allocated_memory}GB, reserved {reserved_memory}GB")
+        el_mem = round(((len(train_dataset) * total_numels) * 8. / (1024.0 ** 3)), 2)
+        print(f">> Infl of {list(current_active_modules.keys())} [{total_numels} els, {el_mem}GB].\nCUDA MEM: {allocated_memory}GB, reserved {reserved_memory}GB")
         # print_tensors_in_use(device=device)
         for module_params_i in active_modules.values():
             module_params_i.requires_grad = False
-        module_params.requires_grad = True                        
+        for module_params_i in current_active_modules.values():
+            module_params_i.requires_grad = True
 
         train_dataloader = torch.utils.data.DataLoader(dataset = train_dataset,
                                             batch_size = 1,
@@ -137,7 +154,11 @@ def compute_infl_from_model(model: torch.nn.Module, train_dataset: OneDataset,
                                             drop_last = False)       
         has_dataset = True 
         while has_dataset:  
-            module_train_grad = torch.zeros((len(train_dataset), module_params.numel()), device = device, dtype=module_params.dtype)
+            active_train_grads = {}
+            for module_name, module_params in current_active_modules.items():
+                module_train_grad = torch.zeros((len(train_dataset), total_numels), device = device, dtype=module_params.dtype)
+                active_train_grads[module_name] = (module_params, module_train_grad)
+            # module_train_grad = torch.zeros((len(train_dataset), total_numels), device = device, dtype=torch.float)
             for step, batch in enumerate(tqdm(train_dataloader)):
                 model.zero_grad() # we aggregate all gradients in .grad
                 if type(batch) == list:
@@ -153,15 +174,19 @@ def compute_infl_from_model(model: torch.nn.Module, train_dataset: OneDataset,
                     loss = outputs.loss
                     loss.backward()  
 
-                module_train_grad[step] = module_params.grad.reshape(-1)
+                for module_name, (module_params, module_train_grad) in active_train_grads.items():
+                    module_train_grad[step] = module_params.grad.view(-1)
 
-            module_infls_one = infl_fn(module_train_grad, avg_val_grad[module_name])
-            module_infls[''][train_dataset.start_index:train_dataset.end_index] += module_infls_one
-            for p_str in module_groups.get(module_name, []):
-                module_infls[p_str][train_dataset.start_index:train_dataset.end_index] += module_infls_one
-            del module_infls_one, module_train_grad
-            has_dataset = train_dataset.load_next_dataset()
-        model.zero_grad()
+            model.zero_grad()
+
+            for module_name, (module_params, module_train_grad) in active_train_grads.items():
+                module_infls_one = infl_fn(module_train_grad, avg_val_grad[module_name])
+                module_infls[''][train_dataset.start_index:train_dataset.end_index] += module_infls_one
+                for p_str in module_groups.get(module_name, []):
+                    module_infls[p_str][train_dataset.start_index:train_dataset.end_index] += module_infls_one
+                del module_infls_one, module_train_grad
+            has_dataset = train_dataset.load_next_dataset()       
+        torch.cuda.empty_cache() 
     for module_params_i in active_modules.values():
         module_params_i.requires_grad = True
     for infl in module_infls.values():
