@@ -133,7 +133,7 @@ def compute_infl_from_model(model: torch.nn.Module, train_dataset: OneDataset,
     adjusted_sizes_pairs = list(enumerate(adjusted_sizes))
 
     # testing
-    active_module_list = ['linear.weight', 'conv1.weight', 'layer4.0.bn1.weight', 'layer4.0.bn1.bias', 'layer4.0.bn2.weight', 'layer4.0.bn2.bias', 'layer4.0.shortcut.1.weight', 'layer4.0.shortcut.1.bias']    
+    # active_module_list = ['linear.weight', 'conv1.weight', 'layer4.0.bn1.weight', 'layer4.0.bn1.bias', 'layer4.0.bn2.weight', 'layer4.0.bn2.bias', 'layer4.0.shortcut.1.weight', 'layer4.0.shortcut.1.bias']    
 
     while True:
         total_numels = 0        
