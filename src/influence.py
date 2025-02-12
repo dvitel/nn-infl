@@ -18,23 +18,27 @@ def hessian_free_fn(module_train_grad, module_avg_val_grads):
 def datainf_fn(module_train_grad, module_avg_val_grads, lambda_const_param=10):    
     module_train_grad_squares = module_train_grad ** 2
     lambda_const = torch.mean(module_train_grad_squares) / lambda_const_param
+    denom_values = lambda_const + torch.sum(module_train_grad_squares, dim=-1)
+    del module_train_grad_squares
+    const_val = lambda_const * module_train_grad.shape[0]
 
     C_tmp_values = module_avg_val_grads * module_train_grad
     nom_values = torch.sum(C_tmp_values, dim=-1)
-    denom_values = lambda_const + torch.sum(module_train_grad_squares, dim=-1)
+    del C_tmp_values
     C_tmp = nom_values / denom_values
+    del nom_values
 
     C_tmp_grad_values = C_tmp.view(-1, 1) * module_train_grad
-
-    const_val = lambda_const * module_train_grad.shape[0]
-
+    del C_tmp
     module_hvp_values = (module_avg_val_grads - C_tmp_grad_values) / const_val
+    del C_tmp_grad_values
 
     module_hvp = torch.sum(module_hvp_values, dim=0)
+    del module_hvp_values
 
     module_infl_values = module_hvp * module_train_grad
     module_infls = module_infl_values.sum(dim=-1)
-    del module_hvp, module_train_grad_squares, C_tmp_values, nom_values, denom_values, C_tmp, C_tmp_grad_values, module_hvp_values, module_infl_values
+    del module_hvp, denom_values, module_infl_values
     return module_infls
 
 def lissa_fn(module_train_grad, module_avg_val_grads, lambda_const_param=10, n_iteration=10, alpha_const=1.):
@@ -64,7 +68,7 @@ def print_tensors_in_use(device="cuda"):
 def compute_infl_from_model(model: torch.nn.Module, train_dataset: OneDataset, 
                                     val_dataset: OneDataset, device = "cuda",
                                     module_patterns: list[str] = [], filter_list = None,
-                                    infl_fn = hessian_free_fn, max_num_el = 10000):
+                                    infl_fn = hessian_free_fn, max_num_el = 10000, size_koef = 0.5):
     ''' Use this for large models - does not require to store all gradients in memory, but
         computes influence on request '''
 
@@ -123,10 +127,13 @@ def compute_infl_from_model(model: torch.nn.Module, train_dataset: OneDataset,
     active_module_list = list(active_modules.keys())
     active_module_list.sort(key=lambda x: active_modules[x].numel(), reverse=True)
 
-    total_memory = (torch.cuda.get_device_properties(device).total_memory / (1024.0 ** 3) - 1)
+    total_memory = (torch.cuda.get_device_properties(device).total_memory / (1024.0 ** 3) - 0.5)
 
-    adjusted_sizes = [*[ 100*(i + 1) for i in range(10)], *[ 1000*(i + 1) for i in range(10)]]        
+    adjusted_sizes = [*[ 100*(i + 1) for i in range(10)], *[ 1000*(i + 1) for i in range(10)], *[ 10000*(i + 1) for i in range(10)]]        
     adjusted_sizes_pairs = list(enumerate(adjusted_sizes))
+
+    # testing
+    active_module_list = ['linear.weight', 'conv1.weight', 'layer4.0.bn1.weight', 'layer4.0.bn1.bias', 'layer4.0.bn2.weight', 'layer4.0.bn2.bias', 'layer4.0.shortcut.1.weight', 'layer4.0.shortcut.1.bias']    
 
     while True:
         total_numels = 0        
@@ -152,10 +159,10 @@ def compute_infl_from_model(model: torch.nn.Module, train_dataset: OneDataset,
         for module_params_i in current_active_modules.values():
             module_params_i.requires_grad = True
 
-        prec_size = round(total_memory * (1024. ** 3) / (total_numels * 8))
+        prec_size = round(total_memory * (1024. ** 3) / (total_numels * 8) * size_koef)
 
         adjusted_size_i = next((i - 1 for i, size in adjusted_sizes_pairs if prec_size < size), None)
-        adjusted_size = None if adjusted_size_i is None or adjusted_size_i == -1 else adjusted_sizes[adjusted_size_i]
+        adjusted_size = train_dataset.total_len() if adjusted_size_i is None or adjusted_size_i == -1 else adjusted_sizes[adjusted_size_i]
 
         if adjusted_size is None:
             adjusted_size = adjusted_sizes[-1]
@@ -173,7 +180,7 @@ def compute_infl_from_model(model: torch.nn.Module, train_dataset: OneDataset,
         while has_dataset:  
             active_train_grads = {}
             for module_name, module_params in current_active_modules.items():
-                module_train_grad = torch.zeros((len(train_dataset), total_numels), device = device, dtype=module_params.dtype)
+                module_train_grad = torch.zeros((len(train_dataset), module_params.numel()), device = device, dtype=module_params.dtype)
                 active_train_grads[module_name] = (module_params, module_train_grad)
             # module_train_grad = torch.zeros((len(train_dataset), total_numels), device = device, dtype=torch.float)
             for step, batch in enumerate(tqdm(train_dataloader)):

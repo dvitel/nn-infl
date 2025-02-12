@@ -331,7 +331,8 @@ influence_fns = \
         # "exact": compute_accurate_influences
     }
 
-def infl(dataset_name = 'cifar10', model_name: str = "resnet34", method = "datainf", self_influence = False):
+def infl(dataset_name = 'cifar10', model_name: str = "resnet34", method = "datainf", self_influence = False,
+         size_koef = 0.5):
     config_path = os.path.join(cwd, f'c_{dataset_name}_{model_name}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)
@@ -343,7 +344,7 @@ def infl(dataset_name = 'cifar10', model_name: str = "resnet34", method = "datai
     dataset_file = checkpoint["training"]["dataset_path"]
     noise_type = checkpoint["training"]["noise_type"]
     dataset_splits: DatasetSplits = torch.load(dataset_file, weights_only = False)
-    train_dataset = OneDataset(dataset_splits, noise_type=noise_type, for_training=True) # max_size = 1000)
+    train_dataset = OneDataset(dataset_splits, noise_type=noise_type, for_training=True) #max_size = 1000)
     if self_influence:
         test_dataset = train_dataset
     else:
@@ -351,7 +352,8 @@ def infl(dataset_name = 'cifar10', model_name: str = "resnet34", method = "datai
 
     method_fn = influence_fns[method]
     runtine, inf_tensors = compute_infl_from_model(model, train_dataset, test_dataset, device = device, infl_fn=method_fn,
-                                                   module_patterns=['layer1\\..*','layer2\\..*','layer3\\..*','layer4\\..*'])
+                                                   module_patterns=['layer1\\..*','layer2\\..*','layer3\\..*','layer4\\..*'],
+                                                   size_koef = size_koef)
 
     config.setdefault("infl_runtimes", {})[method] = runtine
 

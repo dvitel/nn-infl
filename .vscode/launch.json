@@ -92,7 +92,7 @@
             "console": "integratedTerminal",
             "stopOnEntry": false,
             "args": [
-                "infl", "--dataset-name=cifar10", "--model-name=resnet34", "--method=hf"
+                "infl", "--dataset-name=cifar10", "--model-name=resnet34", "--method=datainf", "--size-koef=0.8"
             ],
             "env": {
                 "INFL_SEED": "0",
