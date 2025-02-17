@@ -1,7 +1,7 @@
 #!/bin/bash -l
-#SBATCH --job-name=resnet-infl
+#SBATCH --job-name=infl-lissa
 #SBATCH --time=72:00:00
-#SBATCH --output resnet-i-%j.out
+#SBATCH --output i-lissa-%j.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl
 #SBATCH -p hpg-ai # run on partition general
 #SBATCH --open-mode=append
