@@ -74,12 +74,17 @@ def lissa_fn(module_train_grad, module_avg_val_grads, lambda_const_param=10, n_i
         hvp_tmp_values = module_train_grad * running_hvp
         hvp_tmp_sum = torch.sum(hvp_tmp_values, dim=-1)
         del hvp_tmp_values
-        hvp_tmp_0 = (hvp_tmp_sum.view(-1, 1) * module_train_grad - lambda_const * running_hvp) / n_train
-        del hvp_tmp_sum
+        lambda_running = lambda_const * running_hvp
+        hvp_tmp_sum_view = hvp_tmp_sum.view(-1, 1) * module_train_grad
+        hvp_tmp_0 = hvp_tmp_sum_view - lambda_running
+        hvp_tmp_0 /= n_train
+        del lambda_running, hvp_tmp_sum_view, hvp_tmp_sum
         hvp_tmp = torch.sum(hvp_tmp_0, dim=0)
         del hvp_tmp_0
-        new_running_hvp = module_avg_val_grads + running_hvp - alpha_const * hvp_tmp
-        del hvp_tmp, running_hvp
+        alpha_hvp_tmp = alpha_const * hvp_tmp
+        new_running_hvp = module_avg_val_grads + running_hvp 
+        new_running_hvp -= alpha_hvp_tmp
+        del hvp_tmp, running_hvp, alpha_hvp_tmp
         running_hvp = new_running_hvp
 
     module_infl_values = running_hvp * module_train_grad

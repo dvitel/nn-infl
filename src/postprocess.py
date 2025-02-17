@@ -10,6 +10,8 @@ from scipy import stats
 import torch
 from datasets import load_from_disk
 
+from cifar import DatasetSplits
+
 def draw_mislabel_detection_rate(task="mrpc", res_folder = "./data/", datasets_folder = "./data/",  
                                     module_pattern='', out = "./data/mdr/qnli.png", title = "All modules"):
     # res_pattern = re.compile(res_filer)
@@ -83,6 +85,69 @@ def draw_mislabel_detection_rate(task="mrpc", res_folder = "./data/", datasets_f
     plt.savefig(out)  
     plt.clf()  
 
+
+def draw_mislabel_detection_rate2(infl_folder = "./data/cifar-resnet/infl", dataset_file = "./data/cifar-resnet/ds/d_cifar10_0",  
+                                    out = "./data/mdr/cifar.png", module_name = '', step = 500, title = "All modules", task = "cifar"):
+    ''' For cifar and resnet '''
+    # res_pattern = re.compile(res_filer)
+    all_influences = defaultdict(list)
+    # seeds = defaultdict(list)
+    for file_name in os.listdir(infl_folder):
+        name_parts = file_name.split('.')[0].split('_')
+        method_name = name_parts[1]
+        seed = int(name_parts[-1])
+        # seeds[method_name].append(seed)
+        tensor_dict = torch.load(os.path.join(infl_folder, file_name))
+        t = tensor_dict[module_name]
+        if not(torch.any(torch.isnan(t))):
+            all_influences[method_name].append(t)
+        else:
+            print(f"Found nan in {file_name}")
+    data_detection_per_method = {}
+    dataset_splits: DatasetSplits = torch.load(dataset_file, weights_only = False)
+    for method_name, tensors in all_influences.items():
+        # method_seeds = seeds[method_name]
+        for infls_tensor in tensors:
+            infls = infls_tensor.to('cpu').numpy()
+            noises = (dataset_splits.noisy_labels["worst"] != dataset_splits.train_clean_labels).to('cpu').numpy()
+            noise_index = np.where(noises)[0]
+            n_train = len(infls)
+            detection_rate_list=[]
+            low_quality_to_high_quality=np.argsort(infls)[::-1]
+            for ind in range(1, len(low_quality_to_high_quality)+1, step):
+                detected_samples = set(low_quality_to_high_quality[:ind]).intersection(noise_index)
+                detection_rate = 100*len(detected_samples)/len(noise_index)
+                detection_rate_list.append(detection_rate)
+            data_detection_per_method.setdefault(method_name, []).append(detection_rate_list)
+    method_names = sorted(data_detection_per_method.keys())
+    plt.ioff()
+    for method in method_names:
+        detection_rate_lists = data_detection_per_method[method]
+        drls = np.array(detection_rate_lists)
+        drl = np.mean(drls, axis=0)
+        confidence_level = 0.95
+        degrees_freedom = drls.shape[0] - 1
+        sample_standard_error = stats.sem(drls, axis=0)
+        confidence_interval = stats.t.interval(confidence_level, degrees_freedom, drl, sample_standard_error)
+        min_v = confidence_interval[0]
+        max_v = confidence_interval[1]
+        xs = 100*np.arange(0, n_train, step)/ n_train
+        plt.plot(xs, drl, label=method)
+        plt.fill_between(xs, min_v, max_v, alpha=.1, linewidth=0)
+    plt.axvline(x=30, color='r', linestyle='--', linewidth=1)
+    plt.xlim(0, 100)
+    plt.ylim(0, 100)
+    plt.xlabel('Data inspected (%)')
+    plt.ylabel('Detection Rate (%)')
+    # plt.xticks(fontsize=12)
+    # plt.yticks(fontsize=12)
+    plt.legend(fontsize='small')
+    plt.title(f'{(task.upper())}, {title}', fontsize=15)
+    plt.tight_layout()
+    plt.savefig(out)  
+    plt.clf()  
+
+
 def draw_ft2_metric(task: str, infile: str, outfile: str, metric = 'accuracy', influence_method = "", module_pattern_to_name = {}, allowed_filter_methods = ['rand', 'denoise', 'none']):
     with open(infile, 'r') as f:
         json_lines = f.readlines()
@@ -151,6 +216,12 @@ def list_modules(infl_file: str, module_pattern = ''):
         print(f"{module_name}")
 
 if __name__ == "__main__":
+    # draw_mislabel_detection_rate2(infl_folder = "./data/cifar-resnet/infl", dataset_file = "./data/cifar-resnet/ds/d_cifar10_0",
+    #                                 out = "./data/mdr/cifar.png", module_name = '')
+
+    draw_mislabel_detection_rate2(infl_folder = "./data/cifar-resnet/infl", dataset_file = "./data/cifar-resnet/ds/d_cifar10_0",
+                                    out = "./data/mdr/cifar-layer2.png", module_name = 'layer2\\..*', title='Layer 2')
+        
     # for ds in ['mrpc', 'qnli', 'qqp', 'sst2']:
     #     draw_mislabel_detection_rate(task=ds, res_folder = "./data/infl", module_pattern = '', 
     #                                 datasets_folder = './data/datasets', out = f"./data/mdr/{ds}.png")
@@ -177,16 +248,16 @@ if __name__ == "__main__":
     # draw_curve(res_filer='infl_qnli_', out = "./data/auc/qnli.png")    
     # draw_curve(task="qnli", res_folder = "./data/self-infl", module_pattern = '', datasets_folder = './data/datasets', out = "./data/auc/qnli.png")
     
-    module_pattern_to_name = {".*\\.layer\\.(1[6-9]|2[0-3])\\..*\\.lora_(A|B)\\..*": "last 8", 
-                              "": "all", 
-                              ".*\\.classifier\\..*": "classifier", 
-                              ".*\\.layer\\.([0-9]|1[0-5])\\..*\\.lora_(A|B)\\..*": "first 16", 
-                              "rand": "rand", 
-                              ".*\\.layer\\.[0-8]\\..*\\.lora_(A|B)\\..*": "first 9"}
-    for d in ['mrpc', 'qnli', 'qqp', 'sst2']:
-        for m in ['datainf', 'hf', 'lissa']:
-            draw_ft2_metric(d, infile = f'./data/ft2-infl/{d}.jsonlist', outfile = f'./data/accuracy/{m}/{d}.png', 
-                            influence_method = m, metric = 'accuracy', module_pattern_to_name = module_pattern_to_name)
+    # module_pattern_to_name = {".*\\.layer\\.(1[6-9]|2[0-3])\\..*\\.lora_(A|B)\\..*": "last 8", 
+    #                           "": "all", 
+    #                           ".*\\.classifier\\..*": "classifier", 
+    #                           ".*\\.layer\\.([0-9]|1[0-5])\\..*\\.lora_(A|B)\\..*": "first 16", 
+    #                           "rand": "rand", 
+    #                           ".*\\.layer\\.[0-8]\\..*\\.lora_(A|B)\\..*": "first 9"}
+    # for d in ['mrpc', 'qnli', 'qqp', 'sst2']:
+    #     for m in ['datainf', 'hf', 'lissa']:
+    #         draw_ft2_metric(d, infile = f'./data/ft2-infl/{d}.jsonlist', outfile = f'./data/accuracy/{m}/{d}.png', 
+    #                         influence_method = m, metric = 'accuracy', module_pattern_to_name = module_pattern_to_name)
     
     # module_pattern_to_name = {".*\\.layer\\.(1[6-9]|2[0-3])\\..*\\.lora_(A|B)\\..*": "last 8", "": "all"}
     # for d in ['mrpc', 'qnli', 'qqp', 'sst2']:
