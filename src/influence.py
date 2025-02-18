@@ -15,20 +15,24 @@ def hessian_free_fn(module_train_grad, module_avg_val_grads):
     del module_infl_values
     return module_infs
 
-def hessian_free_vec_fn(module_train_grad, module_val_grads):
-    ''' Return infl matrix '''
-    # module_infl_values = module_val_grads * module_train_grad
-    infl_matrix = torch.einsum('ik,jk->ij', module_val_grads, module_train_grad)
+# def hessian_free_vec_fn(module_train_grad, module_val_grads):
+#     ''' Return infl matrix '''
+#     # module_infl_values = module_val_grads * module_train_grad
+#     infl_matrix = torch.einsum('ik,jk->ij', module_val_grads, module_train_grad)
+#     return infl_matrix
+
+def cosine_similarity_vec_fn(module_train_grad, module_val_grads):
+    infl_matrix = torch.einsum('ik,jk->ij', module_val_grads, module_train_grad) / torch.norm(module_train_grad, dim=-1) / torch.norm(module_val_grads, dim=-1).view(-1, 1)
     return infl_matrix
 
-def cosine_vec_fn(module_train_grad, module_val_grads):
-    infl_matrix = torch.einsum('ik,jk->ij', module_val_grads, module_train_grad)
-    module_train_grad_norm = torch.norm(module_train_grad, dim=-1)
-    infl_matrix /= module_train_grad_norm
-    del module_train_grad_norm
-    module_val_grads_norm = torch.norm(module_val_grads, dim=-1)
-    infl_matrix /= module_val_grads_norm.view(-1, 1)
-    del module_val_grads_norm
+def covariance_vec_fn(module_train_grad, module_val_grads):
+    module_train_means = torch.mean(module_train_grad, dim=-1)
+    module_val_means = torch.mean(module_val_grads, dim=-1)
+    module_train_centered = module_train_grad - module_train_means.view(-1, 1)
+    module_val_centered = module_val_grads - module_val_means.view(-1, 1)
+    del module_train_means, module_val_means
+    infl_matrix = torch.einsum('ik,jk->ij', module_val_centered, module_train_centered) / (module_train_grad.shape[0] - 1)
+    del module_train_centered, module_val_centered
     return infl_matrix
 
 # a = torch.tensor([[1, 2], [3, 4]], dtype=torch.float)
@@ -241,15 +245,15 @@ def compute_infl_from_model(model: torch.nn.Module, train_dataset: OneDataset,
 def compute_infl_matrix_from_model(model: torch.nn.Module, train_dataset: OneDataset, 
                                     val_dataset: OneDataset, device = "cuda",
                                     module_patterns: list[str] = [], filter_list = None,
-                                    infl_vec_fn = hessian_free_vec_fn, max_num_el = 10000, size_koef = 0.5,
-                                    val_set_batch_size = 1000):
+                                    infl_vec_fn = cosine_similarity_vec_fn, max_num_el = 10000, size_koef = 0.5,
+                                    val_set_batch_size = 1000, normalize_by_layer_num = True):
     ''' Instead of aggregating of influence accross all validation samples, builds matrix Infl(v, x) '''
 
     start_time = time()
 
     
     patterns = [ (re.compile(p), p) for p in module_patterns ]
-    model.half()
+    # model.half()
     model.to(device)
     model.eval()
     first_params = next(model.parameters())
@@ -257,7 +261,7 @@ def compute_infl_matrix_from_model(model: torch.nn.Module, train_dataset: OneDat
     infl_matrices = {}
     num_val_samples = val_dataset.total_len()
     total_num_train_samples = train_dataset.total_len()
-    infl_matrices[''] = torch.zeros(num_val_samples, total_num_train_samples, device = first_params.dtype, dtype=first_params.dtype)
+    infl_matrices[''] = torch.zeros(num_val_samples, total_num_train_samples, device = device, dtype=first_params.dtype)
     module_groups = {}
     active_modules = {}
     # filter_list = ['lora_A', 'lora_B', 'modules_to_save.default.out_proj.weight']
@@ -389,19 +393,36 @@ def compute_infl_matrix_from_model(model: torch.nn.Module, train_dataset: OneDat
                     for module_name, (module_params, module_val_grad, module_train_grad) in active_grads.items():
                         module_val_grad[step] = module_params.grad.view(-1)                                    
 
-            for module_name, (module_params, module_val_grad, module_train_grad) in active_grads.items():
-                module_infls_submatrix = infl_vec_fn(module_train_grad, module_val_grad)
-                del module_train_grad, module_val_grad
-                infl_matrices[''][val_dataset.start_index:val_dataset.end_index,train_dataset.start_index:train_dataset.end_index] += module_infls_submatrix
-                for p_str in module_groups.get(module_name, []):
-                    infl_matrices[p_str][val_dataset.start_index:val_dataset.end_index, train_dataset.start_index:train_dataset.end_index] += module_infls_submatrix
-                del module_infls_submatrix
+                for module_name, (module_params, module_val_grad, module_train_grad) in active_grads.items():
+                    module_infls_submatrix = infl_vec_fn(module_train_grad, module_val_grad)
+                    del module_train_grad, module_val_grad
+                    infl_matrices[''][val_dataset.start_index:val_dataset.end_index,train_dataset.start_index:train_dataset.end_index] += module_infls_submatrix
+                    for p_str in module_groups.get(module_name, []):
+                        infl_matrices[p_str][val_dataset.start_index:val_dataset.end_index, train_dataset.start_index:train_dataset.end_index] += module_infls_submatrix
+                    del module_infls_submatrix
+
+                has_val_dataset = val_dataset.load_next_dataset()       
+                        
+
+            # for module_name, (module_params, module_val_grad, module_train_grad) in active_grads.items():
+            #     module_infls_submatrix = infl_vec_fn(module_train_grad, module_val_grad)
+            #     del module_train_grad, module_val_grad
+            #     infl_matrices[''][val_dataset.start_index:val_dataset.end_index,train_dataset.start_index:train_dataset.end_index] += module_infls_submatrix
+            #     for p_str in module_groups.get(module_name, []):
+            #         infl_matrices[p_str][val_dataset.start_index:val_dataset.end_index, train_dataset.start_index:train_dataset.end_index] += module_infls_submatrix
+            #     del module_infls_submatrix
             has_dataset = train_dataset.load_next_dataset()       
         torch.cuda.empty_cache() 
     for module_params_i in active_modules.values():
         module_params_i.requires_grad = True
-    for infl in infl_matrices.values():
-        infl.neg_()         
+    for infl_name, infl in infl_matrices.items():
+        if normalize_by_layer_num:
+            if infl_name == '':
+                num_layers = len(active_modules)  
+            else: 
+                num_layers = len([module_name for module_name, p_strs in module_groups.items() if infl_name in p_strs])
+            infl /= num_layers
+        # infl.neg_()         
     timespan = time() - start_time
     return timespan, infl_matrices
 

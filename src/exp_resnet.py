@@ -8,7 +8,7 @@ import re
 from tqdm import tqdm
 
 from cifar import DatasetSplits, OneDataset
-from influence import  compute_infl_from_model, datainf_fn, hessian_free_fn, lissa_fn
+from influence import  compute_infl_from_model, compute_infl_matrix_from_model, cosine_similarity_vec_fn, covariance_vec_fn, datainf_fn, hessian_free_fn, lissa_fn
 from resnet import ResNet34
 os.environ['HF_HOME'] = os.path.join(os.getcwd(), '.cache')
 import pickle
@@ -363,6 +363,45 @@ def infl(dataset_name = 'cifar10', model_name: str = "resnet34", method = "datai
     with open(config_path, 'w') as file:
         json.dump(config, file)
 
+influence_vec_fns = \
+    {
+        "cov": covariance_vec_fn,
+        "cos": cosine_similarity_vec_fn
+        # "exact": compute_accurate_influences
+    }
+
+def infl_matrix(dataset_name = 'cifar10', model_name: str = "resnet34", method = "cos", self_influence = False,
+         size_koef = 0.7):
+    config_path = os.path.join(cwd, f'c_{dataset_name}_{model_name}_{seed}.json')
+    with open(config_path, 'r') as file:
+        config = json.load(file)
+
+    device = config['device']
+
+    model_path = os.path.join(cwd, f'm_{dataset_name}_{model_name}_{seed}')
+    model, checkpoint = load_checkpoint(model_path)
+    dataset_file = checkpoint["training"]["dataset_path"]
+    noise_type = checkpoint["training"]["noise_type"]
+    dataset_splits: DatasetSplits = torch.load(dataset_file, weights_only = False)
+    train_dataset = OneDataset(dataset_splits, noise_type=noise_type, for_training=True) #, max_size = 100)
+    if self_influence:
+        test_dataset = train_dataset
+    else:
+        test_dataset = OneDataset(dataset_splits, for_training=False) #, max_size=100)
+
+    method_vec_fn = influence_vec_fns[method]
+    runtine, inf_tensors = compute_infl_matrix_from_model(model, train_dataset, test_dataset, device = device, infl_vec_fn=method_vec_fn,
+                                                   module_patterns=['layer1\\..*','layer2\\..*','layer3\\..*','layer4\\..*'],
+                                                   size_koef = size_koef)
+
+    config.setdefault("infl_runtimes", {})[method] = runtine
+
+    infl_path = os.path.join(cwd, f'i_{method}_{dataset_name}_{model_name}_{seed}.pt')
+    torch.save(inf_tensors, infl_path)
+
+    with open(config_path, 'w') as file:
+        json.dump(config, file)        
+
 
 def finetune2(dataset_name = 'cifar10', model_name: str = 'resnet34',
          num_epochs = 100, filter_method='infl', infl_method='datainf', module_pattern='', filter_perc = 0.7):
@@ -450,7 +489,7 @@ def finetune2(dataset_name = 'cifar10', model_name: str = 'resnet34',
         torch.cuda.empty_cache()
 
 parser = argh.ArghParser()
-parser.add_commands([preprocess, finetune, checkpoint, grads, infl, finetune2])
+parser.add_commands([preprocess, finetune, checkpoint, grads, infl, finetune2, infl_matrix])
 
 if __name__ == '__main__':
     try:

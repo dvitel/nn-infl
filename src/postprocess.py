@@ -220,7 +220,7 @@ if __name__ == "__main__":
     #                                 out = "./data/mdr/cifar.png", module_name = '')
 
     draw_mislabel_detection_rate2(infl_folder = "./data/cifar-resnet/infl", dataset_file = "./data/cifar-resnet/ds/d_cifar10_0",
-                                    out = "./data/mdr/cifar-layer2.png", module_name = 'layer2\\..*', title='Layer 2')
+                                    out = "./data/mdr/cifar-layer4.png", module_name = 'layer4\\..*', title='Layer 4, worst noise', task="cifar10")
         
     # for ds in ['mrpc', 'qnli', 'qqp', 'sst2']:
     #     draw_mislabel_detection_rate(task=ds, res_folder = "./data/infl", module_pattern = '', 
