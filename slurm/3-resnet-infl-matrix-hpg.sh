@@ -20,9 +20,9 @@ cwd=/blue/anshumanc.usf/nn-infl/$dataset
 dataset_path=${cwd}/d_${dataset}_0
 
 echo "Starting cos infl matrix $dataset $run_id"
-srun --export=ALL,INFL_SEED=$run_id,INFL_CWD=$cwd python /home/dvitel.usf/nn-infl/src/exp_resnet.py infl-matrix --dataset-name=$dataset --model-name=resnet34 --method=cos --size-koef=0.7
+srun --export=ALL,INFL_SEED=$run_id,INFL_CWD=$cwd python /home/dvitel.usf/nn-infl/src/exp_resnet.py infl-matrix --dataset-name=$dataset --model-name=resnet34 --method=cos --size-koef=0.5
 echo "Done hessian free infl $dataset $run_id"
 
 echo "Starting cov infl matrix $dataset $run_id"
-srun --export=ALL,INFL_SEED=$run_id,INFL_CWD=$cwd python /home/dvitel.usf/nn-infl/src/exp_resnet.py infl-matrix --dataset-name=$dataset --model-name=resnet34 --method=cov --size-koef=0.7
+srun --export=ALL,INFL_SEED=$run_id,INFL_CWD=$cwd python /home/dvitel.usf/nn-infl/src/exp_resnet.py infl-matrix --dataset-name=$dataset --model-name=resnet34 --method=cov --size-koef=0.5
 echo "Done datainf infl $dataset $run_id"
