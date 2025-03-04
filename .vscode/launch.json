@@ -121,7 +121,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "finetune", "--task=qnli", "--model=distilbert/distilroberta-base", "--num-epochs=2"
+                "finetune", "--task=qnli", "--model=distilbert/distilroberta-base", "--num-epochs=2", "--unfreeze-regex=.*\\.word_embeddings\\..*"
             ],
             "env": {
                 "INFL_SEED": "0",

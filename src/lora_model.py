@@ -1,3 +1,5 @@
+import re
+from typing import Optional
 from tqdm import tqdm
 import pickle
 import torch
@@ -38,10 +40,12 @@ import evaluate
     #     self.task=task
     #     self.low_rank=low_rank
         
-def build_LORA_model(model_name_or_path, target_modules, low_rank):
+def build_LORA_model(model_name_or_path, target_modules, low_rank, unfreeze_modules_regex: Optional[str] = None):
     '''
     This function fine-tunes a model for classification tasks. 
     For text generation tasks, please see `notebooks/Influential_Data_Identification-Llama2-Math.ipynb`.
+
+    unfreeze_modules - list of additional modules to unfreeze
     '''
     model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path,
                                                                     return_dict=True)
@@ -55,6 +59,14 @@ def build_LORA_model(model_name_or_path, target_modules, low_rank):
                                 lora_alpha=low_rank, 
                                 lora_dropout=0.05)
     model = get_peft_model(model, peft_config)
+
+    # Unfreeze additional modules
+    if unfreeze_modules_regex:
+        unfreeze_pattern = re.compile(unfreeze_modules_regex)
+        for module_name, module_params in model.named_parameters():
+            if unfreeze_pattern.match(module_name):
+                module_params.requires_grad = True
+
     model.print_trainable_parameters()
 
     return model

@@ -171,7 +171,7 @@ def convert_metrics(eval_metrics):
     
 def finetune(task = 'mrpc', low_rank = 4,
          device = 'cuda', lr = 3e-4, model = 'roberta-large', batch_size = 32,
-         num_epochs = 10, target_modules = ['value']):
+         num_epochs = 10, target_modules = ['value'], unfreeze_regex = None):
     ''' Fine tune specific model on specific task and save it to disk for later postprocessing'''
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
@@ -186,7 +186,7 @@ def finetune(task = 'mrpc', low_rank = 4,
 
     lora_model = build_LORA_model(model_name_or_path=model,
                                 target_modules=target_modules, 
-                                low_rank=low_rank)
+                                low_rank=low_rank, unfreeze_modules_regex=unfreeze_regex)
     eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, device, num_epochs, lr, task)
 
     config['finetune'] = convert_metrics(eval_metrics)
