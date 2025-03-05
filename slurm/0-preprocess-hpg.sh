@@ -1,5 +1,6 @@
 #!/bin/bash -l
 #SBATCH --job-name=glue-noise-dataset
+#SBATCH --time=72:00:00
 #SBATCH --output glue-noise-dataset-%j.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl
 #SBATCH -p hpg-ai # run on partition general

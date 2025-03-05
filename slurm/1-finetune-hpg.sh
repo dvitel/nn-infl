@@ -1,5 +1,6 @@
 #!/bin/bash -l
 #SBATCH --job-name=roberta-tune
+#SBATCH --time=72:00:00
 #SBATCH --output roberta-tune-%j.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl
 #SBATCH -p hpg-ai # run on partition general
