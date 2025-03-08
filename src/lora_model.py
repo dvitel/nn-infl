@@ -39,6 +39,13 @@ import evaluate
     #     self.lr=lr
     #     self.task=task
     #     self.low_rank=low_rank
+
+def unfreeze_modules(model, unfreeze_modules_regex: Optional[str] = None):
+    if unfreeze_modules_regex:
+        unfreeze_pattern = re.compile(unfreeze_modules_regex)
+        for module_name, module_params in model.named_parameters():
+            if unfreeze_pattern.match(module_name):
+                module_params.requires_grad = True
         
 def build_LORA_model(model_name_or_path, target_modules, low_rank, unfreeze_modules_regex: Optional[str] = None):
     '''
@@ -60,18 +67,13 @@ def build_LORA_model(model_name_or_path, target_modules, low_rank, unfreeze_modu
                                 lora_dropout=0.05)
     model = get_peft_model(model, peft_config)
 
-    # Unfreeze additional modules
-    if unfreeze_modules_regex:
-        unfreeze_pattern = re.compile(unfreeze_modules_regex)
-        for module_name, module_params in model.named_parameters():
-            if unfreeze_pattern.match(module_name):
-                module_params.requires_grad = True
+    unfreeze_modules(model, unfreeze_modules_regex)
 
     model.print_trainable_parameters()
 
     return model
 
-def load_pretrained_LORA_model(model_name_or_path):
+def load_pretrained_LORA_model(model_name_or_path, unfreeze_modules_regex: Optional[str] = None):
     '''
     This function loads a pre-trained model.
     '''
@@ -79,19 +81,27 @@ def load_pretrained_LORA_model(model_name_or_path):
     model = PeftModel.from_pretrained(base_model, model_name_or_path, is_trainable=True)
     model.config.use_cache = False
     model.config.pad_token_id = model.config.eos_token_id
+
+    unfreeze_modules(model, unfreeze_modules_regex)
+    
     model.print_trainable_parameters()
     return model
 
 def train_LORA_model(model,
-        train_dataloader=None,
-        eval_dataloader=None,
+        train_dataloader: DataLoader,
+        eval_dataloader: DataLoader,
         device="cuda",
         num_epochs=10,
         lr=3e-4,
-        task="mrpc"):
+        task="mrpc",
+        compute_cancellation = False,
+        compute_gold_val_predictions = False):
     '''
     This function fine-tunes a model for GLUE classification tasks. 
     For text generation tasks, please see `notebooks/Influential_Data_Identification-Llama2-Math.ipynb`.
+
+    Params compute_cancellation and compute_gold_val_predictions are used for metrics from:
+        https://proceedings.neurips.cc/paper_files/paper/2022/file/d07022783ff6f7bf7a288c207b7dcbd1-Paper-Conference.pdf
     '''
     metric = evaluate.load("glue", task)
     optimizer = AdamW(params=model.parameters(), lr=lr)
@@ -104,17 +114,57 @@ def train_LORA_model(model,
     )
 
     model.to(device)
-    eval_metrics = []
+    eval_metrics = {}
+    weights_delta = {}
+    grads_abs = {}
+    current_lr = lr
+    cancellation = {}
+    gold_val_predictions = []
     for epoch in range(num_epochs):
         model.train()
+        if (epoch == (num_epochs - 1)) and compute_cancellation: 
+            weights_before = {}
+            for name, param in model.named_parameters():
+                if param.requires_grad:
+                    weights_before[name] = param.clone().detach()
+            current_lr = lr_scheduler.get_last_lr()[0]
+            cancellation_data_loader = DataLoader(train_dataloader.dataset, batch_size=1, shuffle=False, collate_fn=train_dataloader.collate_fn)
+            for step, batch in enumerate(tqdm(cancellation_data_loader)):
+                optimizer.zero_grad()
+                batch.to(device)
+                outputs = model(**batch)
+                loss = outputs.loss
+                loss.backward()
+                for name, param in model.named_parameters():
+                    if param.requires_grad:
+                        if name in grads_abs:
+                            grads_abs[name] += torch.norm(param.grad.view(-1))
+                        else:
+                            grads_abs[name] = torch.norm(param.grad.view(-1))                    
+            optimizer.zero_grad()
+
         for step, batch in enumerate(tqdm(train_dataloader)):
             batch.to(device)
             outputs = model(**batch)
             loss = outputs.loss
             loss.backward()
-            optimizer.step()
+            optimizer.step()            
             lr_scheduler.step()
             optimizer.zero_grad()
+
+        if (epoch == (num_epochs - 1)) and compute_cancellation: 
+            weights_after = {}
+            for name, param in model.named_parameters():
+                if param.requires_grad:
+                    weights_after[name] = param.clone().detach()
+
+            for param_name in weights_before.keys():            
+                weights_delta[param_name] = torch.norm((weights_after[name] - weights_before[name]).view(-1))
+            for name in grads_abs.keys():
+                grads_abs[name] *= current_lr                        
+            for name in grads_abs.keys():
+                cancellation[name] = (grads_abs[name] / weights_delta[name]).item()
+
 
         model.eval()
         for step, batch in enumerate(tqdm(eval_dataloader)):
@@ -128,9 +178,18 @@ def train_LORA_model(model,
                 references=references,
             )
 
+            if (epoch == (num_epochs - 1)) and compute_gold_val_predictions:
+                batch_gold_preds = outputs.logits[torch.arange(outputs.logits.shape[0]), references].cpu().tolist()
+                gold_val_predictions.extend(batch_gold_preds)
+
         eval_metric = metric.compute()
         print(f"Epoch {(epoch+1)}:", eval_metric)
-        eval_metrics.append(eval_metric)
+        for key, item in eval_metric.items():
+            eval_metrics.setdefault(key, []).append(item)
+    if len(cancellation) > 0:
+        eval_metrics["cancellation"] = cancellation
+    if len(gold_val_predictions) > 0:
+        eval_metrics["gold_val_predictions"] = gold_val_predictions
     return eval_metrics
 
 def compute_grads(model, dataloader, device="cuda", bring_to_cpu=False):

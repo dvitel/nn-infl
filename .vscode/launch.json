@@ -157,6 +157,20 @@
             }
         },
         {
+            "name": "Infl matrix: GLUE QNLI on DistilRoberta",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "infl-matrix", "--task=qnli", "--methods=datainf"
+            ],
+            "env": {
+                "INFL_SEED": "0",
+                "INFL_CWD": "./data/dev"
+            }
+        },        
+        {
             "name": "Finetune2: GLUE QNLI on DistilRoberta",
             "type": "debugpy",
             "request": "launch",
