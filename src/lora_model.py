@@ -116,9 +116,13 @@ def train_LORA_model(model,
     model.to(device)
     eval_metrics = {}
     weights_delta = {}
+    weights_delta_abs = {}
+    weights_delta_norms = {}
     grads_abs = {}
+    grads_norms = {}
     current_lr = lr
-    cancellation = {}
+    cancel_norm = {}
+    cancel_abs = {}
     gold_val_predictions = []
     for epoch in range(num_epochs):
         model.train()
@@ -138,9 +142,13 @@ def train_LORA_model(model,
                 for name, param in model.named_parameters():
                     if param.requires_grad:
                         if name in grads_abs:
-                            grads_abs[name] += torch.norm(param.grad.view(-1))
+                            grads_abs[name] += torch.abs(param.grad)
                         else:
-                            grads_abs[name] = torch.norm(param.grad.view(-1))                    
+                            grads_abs[name] = torch.abs(param.grad)
+                        if name in grads_norms:
+                            grads_norms[name] += torch.norm(param.grad.view(-1))
+                        else:
+                            grads_norms[name] = torch.norm(param.grad.view(-1))
             optimizer.zero_grad()
 
         for step, batch in enumerate(tqdm(train_dataloader)):
@@ -158,13 +166,23 @@ def train_LORA_model(model,
                 if param.requires_grad:
                     weights_after[name] = param.clone().detach()
 
-            for param_name in weights_before.keys():            
-                weights_delta[param_name] = torch.norm((weights_after[name] - weights_before[name]).view(-1))
+            for name in weights_before.keys():            
+                weights_delta[name] = weights_after[name] - weights_before[name]
+                weights_delta_abs[name] = torch.abs(weights_delta[name])
+                # weights_delta_abs[name] += 1e-20 # to avoid division by zero
+                weights_delta_norms[name] = torch.norm(weights_delta[name].view(-1))
             for name in grads_abs.keys():
-                grads_abs[name] *= current_lr                        
+                grads_abs[name] *= current_lr   
+            for name in grads_norms.keys():
+                grads_norms[name] *= current_lr                     
             for name in grads_abs.keys():
-                cancellation[name] = (grads_abs[name] / weights_delta[name]).item()
-
+                # cancel_abs[name] = torch.mean(grads_abs[name] / weights_delta_abs[name]).item()
+                updated_grads = (grads_abs[name] > 0).view(-1)
+                grads_to_consider = (grads_abs[name] / weights_delta_abs[name]).view(-1)[updated_grads]
+                cancel_abs[name] = torch.median(grads_to_consider).item()
+            for name in grads_norms.keys():
+                cancel_norm[name] = (grads_norms[name] / weights_delta_norms[name]).item()
+            del weights_before, weights_after, weights_delta, grads_abs, weights_delta_abs, weights_delta_norms
 
         model.eval()
         for step, batch in enumerate(tqdm(eval_dataloader)):
@@ -186,8 +204,10 @@ def train_LORA_model(model,
         print(f"Epoch {(epoch+1)}:", eval_metric)
         for key, item in eval_metric.items():
             eval_metrics.setdefault(key, []).append(item)
-    if len(cancellation) > 0:
-        eval_metrics["cancellation"] = cancellation
+    if len(cancel_norm) > 0:
+        eval_metrics["cancel_norm"] = cancel_norm
+    if len(cancel_abs) > 0:
+        eval_metrics["cancel_abs"] = cancel_abs        
     if len(gold_val_predictions) > 0:
         eval_metrics["gold_val_predictions"] = gold_val_predictions
     return eval_metrics
