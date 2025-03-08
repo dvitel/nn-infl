@@ -144,18 +144,10 @@ def preprocess(task = 'qnli', noise_ratio = 0.2, tokenizer_name='roberta-large')
     tokenized_datasets.save_to_disk(dataset_path)
 
 def build_loaders(dataset_path, tokenizer_name, batch_size = 32, shuffle_train = True, 
-                    filter_fn = None, val_size = None):
+                    filter_fn = None):
     datasets = load_from_disk(dataset_path)
     trainset = datasets['train']  
-    n_val = len(datasets['validation'])
-    if val_size is not None and abs(val_size) < n_val:
-        if val_size < 0:
-            val_range = range(n_val + val_size, n_val)
-        else:
-            val_range = range(0, val_size)
-        valset = datasets['validation'].select(val_range)
-    else:
-        valset = datasets['validation']
+    valset = datasets['validation']
     if filter_fn is not None:
         trainset = filter_fn(trainset)
     trainset = trainset.remove_columns(['noise'])
@@ -185,7 +177,7 @@ def finetune(task = 'mrpc', low_rank = 4,
 
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
     train_dataloader, eval_dataloader, tokenizer = \
-        build_loaders(dataset_path, config['tokenizer_name'], batch_size, val_size = 500)
+        build_loaders(dataset_path, config['tokenizer_name'], batch_size)
 
     lora_model = build_LORA_model(model_name_or_path=model,
                                 target_modules=target_modules, 
@@ -227,7 +219,7 @@ def grads(task = 'mrpc', no_val = False, return_grads = False, config = None):
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
     train_dataloader, eval_dataloader, _ = \
         build_loaders(dataset_path, config['tokenizer_name'], batch_size=1, 
-                        shuffle_train=False, val_size=500)
+                        shuffle_train=False)
     train_grads = compute_grads(lora_model, train_dataloader, device=device, bring_to_cpu=not return_grads)
     if no_val:
         val_grads = {}
@@ -837,7 +829,7 @@ def finetune2(task = 'mrpc',
 
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
     train_dataloader, eval_dataloader, _ = \
-        build_loaders(dataset_path, config['tokenizer_name'], batch_size, filter_fn=filter_fn, val_size=500)
+        build_loaders(dataset_path, config['tokenizer_name'], batch_size, filter_fn=filter_fn)
 
     lora_model = build_LORA_model(model_name_or_path=model,
                                 target_modules=target_modules, 
