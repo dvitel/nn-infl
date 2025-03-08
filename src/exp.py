@@ -409,13 +409,13 @@ class CurrentActiveModules:
         pass
 
     def __enter__(self):
-        for _, _, param in self.cur_active_modules:
+        for _, _, param in self.all_active_modules:
             param.requires_grad = False
         for _, _, param in self.cur_active_modules:
             param.requires_grad = True
 
     def __exit__(self, exc_type, exc_value, traceback):
-        for _, _, param in self.cur_active_modules:
+        for _, _, param in self.all_active_modules:
             param.requires_grad = True
 
     def numel(self):
