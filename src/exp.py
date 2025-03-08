@@ -645,7 +645,7 @@ matrix_infl_methods = {
 }
 
 # Mem koef NOTE: hf (1.1, 0.3), hf_we_ (2, 0.3), hf_we_topk (2, 0.3), cos (1.1, 0.3), cov (2, 0.3), datainf_one (1.1, 0.3), datainf (2, 0.3), 
-def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datainf_one,datainf", mem_koef=2, mem_delta=0.3):
+def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datainf_one,datainf", mem_koef: float = 2.0, mem_delta: float = 0.3):
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)
@@ -686,7 +686,7 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
     common_tokens = {}
 
     if any('_we_' in method_name for method_name in method_names):
-        common_tokens_ds = os.path.join(cwd, f'common_tokens.pkl')
+        common_tokens_ds = os.path.join(cwd, f'common_tokens_{task}_{seed}.pkl')
         if os.path.exists(common_tokens_ds):
             with open(common_tokens_ds, 'rb') as file:
                 common_tokens = pickle.load(file)

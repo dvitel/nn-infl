@@ -163,7 +163,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "infl-matrix", "--task=qnli", "--methods=datainf"
+                "infl-matrix", "--task=qnli", "--methods=datainf", "--mem-koef=1.5"
             ],
             "env": {
                 "INFL_SEED": "0",
