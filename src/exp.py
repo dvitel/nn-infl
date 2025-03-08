@@ -183,7 +183,7 @@ def finetune(task = 'mrpc', low_rank = 4,
                                 target_modules=target_modules, 
                                 low_rank=low_rank, unfreeze_modules_regex=unfreeze_regex)
     eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, device, num_epochs, lr, task,
-                                    compute_cancellation=True, compute_gold_val_predictions=True)
+                                    compute_cancellation=False, compute_gold_val_predictions=False)
 
     config['finetune'] = eval_metrics
     
@@ -401,8 +401,8 @@ def pick_modules_and_split_size(active_modules_sorted: list[tuple[str, int]], tr
     return (selected_index, estimated_train_size, estimated_val_size)
 
 class CurrentActiveModules:
-    def __init__(self, active_modules: list[tuple[str, int, torch.nn.Parameter]], index, size):
-        self.cur_active_modules = active_modules[index:index + size]
+    def __init__(self, cur_active_modules: list[tuple[str, int, torch.nn.Parameter]], active_modules: list[tuple[str, int, torch.nn.Parameter]]):
+        self.cur_active_modules = cur_active_modules
         self.all_active_modules = active_modules
         self.cur_params = [param for _, _, param in self.cur_active_modules]
         self.enumerated_names = [name for name, _, _ in self.cur_active_modules]
@@ -718,14 +718,13 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
     
     interaction_modules = set([module_name for int_matrices in interaction_matrices.values() for module_name in int_matrices.keys()])
 
-    active_modules = [(name, size, params) for name, size, params in active_modules if name in interaction_modules]
+    all_active_modules = [(name, size, params) for name, size, params in active_modules if name in interaction_modules]    
     
-    module_idx = 0 
-
-
-    while module_idx < len(active_modules):
-        module_idx_delta, train_size, test_size = pick_modules_and_split_size(active_modules, len(trainset), len(valset), method_memory_koef=mem_koef, memory_delta=mem_delta, device=device)
-        cur_params = CurrentActiveModules(active_modules, module_idx, module_idx_delta)
+    while len(all_active_modules) > 0:
+        selected_module_count, train_size, test_size = pick_modules_and_split_size(all_active_modules, len(trainset), len(valset), method_memory_koef=mem_koef, memory_delta=mem_delta, device=device)
+        cur_active_modules = all_active_modules[:selected_module_count]
+        all_active_modules = all_active_modules[selected_module_count:]
+        cur_params = CurrentActiveModules(cur_active_modules, active_modules)
         infl_contexts = {method_name: {} for method_name in method_names} # methods could store arbitrary data here between calls to method_fn
         with cur_params:
             train_val_splits = DatasetSplits(trainset, train_size, valset, test_size)
@@ -760,8 +759,7 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
                 if 'continuation' in method_infl_context:
                     cur_int_matrices = interaction_matrices[method_name]
                     method_infl_context['continuation'](cur_int_matrices, **method_infl_context)
-
-        module_idx += module_idx_delta
+        pass 
 
 
     for method_name, infl_matrices in interaction_matrices.items():
