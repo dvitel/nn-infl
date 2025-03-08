@@ -1,0 +1,29 @@
+#!/bin/bash -l
+#SBATCH --job-name=r-infl-hf-we
+#SBATCH --time=72:00:00
+#SBATCH --output r-infl-hf-we-%j.out
+#SBATCH -D /blue/anshumanc.usf/nn-infl
+#SBATCH -p hpg-ai 
+#SBATCH --open-mode=append
+#SBATCH --gpus=1 # 1 GPU
+#SBATCH --array=0-3
+
+module load conda/24.7.1
+conda activate /home/dvitel.usf/torch-env
+
+tasks=("qnli" "mrpc" "sst2" "qqp")
+
+task=${tasks[$SLURM_ARRAY_TASK_ID]}
+
+task_cwd=/data/dvitel/infl/$task
+
+method_name='cos'
+mem_koef=1.1
+
+for run_id in {0..9}; do
+
+    echo "Infl matrix $task $run_id $method_name"
+    srun --export=ALL,INFL_SEED=$run_id,INFL_CWD=$task_cwd python /home/dvitel.usf/nn-infl/src/exp.py infl-matrix --task=$task --methods=$method_name --mem-koef=$mem_koef
+    echo "----- Done $task $run_id $method_name"
+
+done

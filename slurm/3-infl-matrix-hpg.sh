@@ -13,7 +13,7 @@ conda activate /home/dvitel.usf/torch-env
 
 tasks=("qnli" "mrpc" "sst2" "qqp")
 
-methods=("hf" "hf_we_" "hw_we_topk_10" "cos" "cov" "datainf_one" "datainf")
+methods=("hf" "hf_we_" "hf_we_topk_10" "cos" "cov" "datainf_one" "datainf")
 mem_koefs=("1.1" "2" "2" "1.1" "2" "1.1" "2")
 
 task=${tasks[$SLURM_ARRAY_TASK_ID]}
