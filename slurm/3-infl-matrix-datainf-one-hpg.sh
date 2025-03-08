@@ -1,7 +1,7 @@
 #!/bin/bash -l
-#SBATCH --job-name=r-infl-hf-we
+#SBATCH --job-name=r-infl-d-o
 #SBATCH --time=72:00:00
-#SBATCH --output r-infl-hf-we-%j.out
+#SBATCH --output r-infl-d-o-%j.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl
 #SBATCH -p hpg-ai 
 #SBATCH --open-mode=append
