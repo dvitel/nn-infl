@@ -15,7 +15,7 @@ tasks=("qnli" "mrpc" "sst2" "qqp")
 
 task=${tasks[$SLURM_ARRAY_TASK_ID]}
 
-task_cwd=/data/dvitel/infl/$task
+task_cwd=/blue/anshumanc.usf/nn-infl/$task
 
 method_name='cos'
 mem_koef=1.1
