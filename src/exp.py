@@ -687,6 +687,7 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
 
     if any('_we_' in method_name for method_name in method_names):
         common_tokens_ds = os.path.join(cwd, f'common_tokens_{task}_{seed}.pkl')
+        should_recompute = False
         try:
             with open(common_tokens_ds, 'rb') as file:
                 common_tokens = pickle.load(file)
