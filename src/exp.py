@@ -766,8 +766,10 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
         infl_path = os.path.join(cwd, f'i_{method_name}_{task}_{seed}.pt')
         torch.save(infl_matrices, infl_path)
 
-    with open(config_path, 'w') as file:
-        json.dump(config, file)
+    # with open(config_path, 'w') as file:
+    #     fcntl.flock(file, fcntl.LOCK_EX)
+    #     json.dump(config, file)
+    #     fcntl.flock(file, fcntl.LOCK_UN)    
 
 def finetune2(task = 'mrpc',
          num_epochs = 10, filter_method='infl', infl_method='datainf', module_pattern='', filter_perc = 0.7):
