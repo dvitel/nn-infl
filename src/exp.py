@@ -648,21 +648,25 @@ matrix_infl_methods = {
 }
 
 # Mem koef NOTE: hf (1.1, 0.3), hf_we_ (2, 0.3), hf_we_topk (2, 0.3), cos (1.1, 0.3), cov (2, 0.3), datainf_one (1.1, 0.3), datainf (2, 0.3), 
-def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datainf_one,datainf", mem_koef: float = 2.0, mem_delta: float = 0.3):
+def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datainf_one,datainf", mem_koef: float = 2.0, mem_delta: float = 0.3,
+                ignore_metrics = False, i_prefix='i', m_prefix='m'):
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)
 
     # method_list = methods.split(',')
     device = config['device']
-    unfreeze_regex = config.get('unfreeze_regex', None)
+    if ignore_metrics:
+        unfreeze_regex = None
+    else:
+        unfreeze_regex = config.get('unfreeze_regex', None)
 
     # if with_grads:
     #     gradients = grads(task = task, return_grads=True, config=config, no_val=self_influence)
     # else:
     #     gradients = torch.load(os.path.join(cwd, f'g_{task}_{seed}.pt'))
 
-    model_path = os.path.join(cwd, f'm_{task}_{seed}')
+    model_path = os.path.join(cwd, f'{m_prefix}_{task}_{seed}')
 
     # todo check if reequires_grad is attached to embedding
     lora_model = load_pretrained_LORA_model(model_name_or_path=model_path, unfreeze_modules_regex=unfreeze_regex)
@@ -769,7 +773,7 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
 
 
     for method_name, infl_matrices in interaction_matrices.items():
-        infl_path = os.path.join(cwd, f'i_{method_name}_{task}_{seed}.pt')
+        infl_path = os.path.join(cwd, f'{i_prefix}_{method_name}_{task}_{seed}.pt')
         torch.save(infl_matrices, infl_path)
 
     # with open(config_path, 'w') as file:
