@@ -3,9 +3,12 @@ import json
 import os
 import pickle
 import re
+from typing import Optional
 
+import datasets
 from matplotlib import pyplot as plt
 import numpy as np
+from pandas import DataFrame
 from scipy import stats
 import torch
 from datasets import load_from_disk
@@ -215,12 +218,192 @@ def list_modules(infl_file: str, module_pattern = ''):
     for module_name, infls in selected:
         print(f"{module_name}")
 
+# NOTE: Obserted effect: noisy group for some layers has less % (on average) of codirected infl samples than clean group 
+def dir_majority_indicator(inf_matrix: torch.Tensor, *, additional_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    ''' Returns 1 for each train sample that has majority of codirected influences (positive influences)'''
+    same_dir_mask = inf_matrix > 0
+    if additional_mask is not None:
+        same_dir_mask &= additional_mask
+        half_infl = additional_mask.sum(dim=0) // 2
+    else:
+        half_infl = same_dir_mask.shape[0] // 2
+    maj = torch.sum(same_dir_mask, dim=0) > half_infl
+    return maj
+
+# scores - bigger is better (more influential example).
+def mean_score(inf_matrix: torch.Tensor, *, additional_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    if additional_mask is not None:
+        inf_matrix_clone = inf_matrix.clone()
+        inf_matrix_clone[~additional_mask] = 0
+        inf_matrix = inf_matrix_clone
+        denoms = additional_mask.sum(dim=0)
+    else:
+        denoms = inf_matrix.shape[0]
+    res = inf_matrix.sum(dim=0) / denoms
+    return res
+
+def median_score(inf_matrix: torch.Tensor, *, additional_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    if additional_mask is not None:
+        inf_matrix_clone = inf_matrix.clone()
+        inf_matrix_clone[~additional_mask] = torch.nan
+        inf_matrix = inf_matrix_clone
+    res = torch.nanmedian(inf_matrix, dim=0)[0]
+    return res
+
+def mean_dir_score(inf_matrix: torch.Tensor, *, additional_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    same_dir_mask = inf_matrix > 0
+    if additional_mask is not None:
+        same_dir_mask &= additional_mask
+        denoms = additional_mask.sum(dim=0)
+    else:
+        denoms = inf_matrix.shape[0]
+    res = same_dir_mask.sum(dim=0).float() / denoms
+    return res
+
+def compute_noise_detection_metrics(infl_file_name: str, ds_file_name: str, device = 'cuda'):    
+    matrix_dict = torch.load(infl_file_name)
+    ds = datasets.load_from_disk(ds_file_name)
+    trainset = ds['train']
+    trainset_labels = torch.tensor(trainset['labels'], device = device)
+    noise_mask = torch.tensor(trainset['noise'], device = device)
+    noise_list = trainset['noise']
+    infl = ds['infl']
+    infl_labels = torch.tensor(infl['labels'], device = device)
+    num_noise = noise_mask.sum().item()
+    num_clean = len(trainset) - num_noise
+    num_infl = len(infl)
+
+    class_match_mask = infl_labels.unsqueeze(1) == trainset_labels.unsqueeze(0)    
+
+    score_fns = [mean_score, median_score, mean_dir_score]
+
+    # glob_mask = torch.zeros((len(infl), len(trainset)), dtype = torch.bool, device = device)
+
+    # here we deal with binary confusion matrix
+    # i0 = torch.where(infl_labels == 0)[0]
+    # i1 = torch.where(infl_labels == 1)[0]
+    # t0_n = torch.where((trainset_labels == 0) & noise_mask)[0]
+    # t0_c = torch.where((trainset_labels == 0) & ~noise_mask)[0]
+    # t1_n = torch.where((trainset_labels == 1) & noise_mask)[0]
+    # t1_c = torch.where((trainset_labels == 1) & ~noise_mask)[0]
+
+    column_names = [fn.__name__ for fn in score_fns] #["maj_acc", "maj_same_class_acc", "maj_diff_class_acc"] #['noise_maj', 'clean_maj', 'noise_maj_same_class', 'clean_maj_same_class', 'noise_maj_diff_class', 'clean_maj_diff_class']
+    rows = []
+    ideal_area = num_noise / 2 + num_clean
+    baseline_auc_roc = ((num_clean + num_noise) / 2) / ideal_area
+    curves = {}
+    total_int_matrix = torch.zeros((len(infl), len(trainset)), dtype=torch.float, device = device)
+    module_filter = ['lora_A', 'lora_B', 'modules_to_save.default.out_proj.weight']
+    for module_name, int_matrix in matrix_dict.items():
+        if not any(f in module_name for f in module_filter):
+            total_int_matrix += int_matrix
+    matrix_dict['total'] = total_int_matrix
+    
+    for module_name, int_matrix in matrix_dict.items():
+
+        # module_metrics = {}
+        auc_rocs = []
+        curve_list = curves.setdefault(module_name, [])
+
+        for score_fn in score_fns: 
+
+            scores = score_fn(int_matrix, additional_mask=~class_match_mask)
+            
+            train_ids = torch.argsort(scores).tolist()
+
+            noise_perc = []
+            noise_count = 0
+            for train_id in train_ids:
+                if noise_list[train_id]:
+                    noise_count += 1
+                noise_perc.append(noise_count / num_noise)
+            auc_roc = sum((noise_perc[i] + noise_perc[i + 1]) / 2 for i in range(len(noise_perc) - 1)) / ideal_area
+            curve_list.append(noise_perc)
+
+            auc_rocs.append(auc_roc)
+        rows.append([module_name, *auc_rocs])
+
+            # module_metrics.setdefault(score_fn.__name__, {"auc_roc": auc_roc, "curve": noise_perc})
+
+
+        # maj = dir_majority_indicator(int_matrix)
+        # noise_maj = maj[noise_mask].float().mean().item()
+        # clean_maj = maj[~noise_mask].float().mean().item()
+
+        # maj_same_class = dir_majority_indicator(int_matrix, additional_mask = class_match_mask)
+        # noise_maj_same_class = maj_same_class[noise_mask].float().mean().item()
+        # clean_maj_same_class = maj_same_class[~noise_mask].float().mean().item()
+
+        # maj_diff_class = dir_majority_indicator(int_matrix, additional_mask = ~class_match_mask)
+        # noise_maj_diff_class = maj_diff_class[noise_mask].float().mean().item()
+        # clean_maj_diff_class = maj_diff_class[~noise_mask].float().mean().item()
+    
+        # rows.append([module_name, noise_maj, clean_maj, noise_maj_same_class, clean_maj_same_class, noise_maj_diff_class, clean_maj_diff_class])
+        # rows.append([module_name, maj_acc, maj_same_class_acc, maj_diff_class_acc])
+
+    modules_sorted = sorted(rows, key = lambda x: max(x[1:]), reverse=True)
+
+    best_3_module_names = [mn[0] for mn in modules_sorted[:3]]
+
+    plt.ioff()
+    colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k']
+    xs = 100*np.arange(len(trainset))/ len(trainset)
+    replace_name = {'layer': 'L', 'classifier': 'C', 'word_embeddings': 'WE' }
+    for mid, module_name in enumerate(best_3_module_names):
+        simple_name_parts = [replace_name.get(n, n) for n in module_name.split('.') if n not in ['base_model', 'model', 'roberta', 'encoder', 'embeddings', 'default', 'value', 'weight', 'attention', 'self', 'modules_to_save']]
+
+        # detection_rate_lists = data_detection_per_method[method]
+        # drls = np.array(detection_rate_lists)
+        # drl = np.mean(drls, axis=0)
+        # confidence_level = 0.95
+        # degrees_freedom = drls.shape[0] - 1
+        # sample_standard_error = stats.sem(drls, axis=0)
+        # confidence_interval = stats.t.interval(confidence_level, degrees_freedom, drl, sample_standard_error)
+        # min_v = confidence_interval[0]
+        # max_v = confidence_interval[1]
+        ys = curves[module_name]
+        linestyles = ['-', '--', '-.']
+        simple_module_name = ' '.join(simple_name_parts)
+        for curve_id, (curve, score_fn) in enumerate(zip(ys, score_fns)):
+            plt.plot(xs, [ c * 100 for c in curve], label=f"{simple_module_name} {score_fn.__name__}", linestyle=linestyles[curve_id], color = colors[mid], linewidth = 1.5)
+        # plt.fill_between(xs, min_v, max_v, alpha=.1, linewidth=0)
+    best_xs =100*np.arange(num_noise)/ len(trainset)
+    best_ys = [cnt * 100 / num_noise for cnt in range(num_noise)]
+    plt.plot(best_xs, best_ys, color='gray', linestyle='--', linewidth=1)
+    default_ys = [cnt * 100 / len(trainset) for cnt in range(len(trainset)) ]
+    plt.plot(xs, default_ys, color='gray', linestyle='--', linewidth=1)
+    plt.axvline(x=num_noise * 100 / len(trainset), color='gray', linestyle='--', linewidth=1)
+    plt.xlim(0, 100)
+    plt.ylim(0, 100)
+    plt.xlabel('Data inspected (%)')
+    plt.ylabel('Detection Rate (%)')
+    # plt.xticks(fontsize=12)
+    # plt.yticks(fontsize=12)
+    plt.legend(fontsize='small')
+    # plt.title(f'{(task.upper())}, {title}', fontsize=15)
+    plt.tight_layout()
+    # plt.show()
+    plt.savefig('tmp.png')  
+    plt.clf()  
+
+
+
+
+    perc = DataFrame(rows, columns = ['module', *column_names])
+    print(perc)
+
+    perc.to_csv(f'tmp.csv', index = False)
+
+    pass
+
 if __name__ == "__main__":
+
+    compute_noise_detection_metrics('./data/infl-matrix/qnli/i_hf_qnli_0.pt', './data/infl-matrix/qnli/d_qnli_0')
     # draw_mislabel_detection_rate2(infl_folder = "./data/cifar-resnet/infl", dataset_file = "./data/cifar-resnet/ds/d_cifar10_0",
     #                                 out = "./data/mdr/cifar.png", module_name = '')
 
-    draw_mislabel_detection_rate2(infl_folder = "./data/cifar-resnet/infl", dataset_file = "./data/cifar-resnet/ds/d_cifar10_0",
-                                    out = "./data/mdr/cifar-layer4.png", module_name = 'layer4\\..*', title='Layer 4, worst noise', task="cifar10")
+    # draw_mislabel_detection_rate2(infl_folder = "./data/cifar-resnet/infl", dataset_file = "./data/cifar-resnet/ds/d_cifar10_0",
+    #                                 out = "./data/mdr/cifar-layer4.png", module_name = 'layer4\\..*', title='Layer 4, worst noise', task="cifar10")
         
     # for ds in ['mrpc', 'qnli', 'qqp', 'sst2']:
     #     draw_mislabel_detection_rate(task=ds, res_folder = "./data/infl", module_pattern = '', 

@@ -121,7 +121,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "finetune", "--task=qnli", "--model=distilbert/distilroberta-base", "--num-epochs=2", "--unfreeze-regex=.*\\.word_embeddings\\..*"
+                "finetune", "--task=qnli", "--model=distilbert/distilroberta-base", "--num-epochs=2", "--unfreeze-regex=.*\\.word_embeddings\\..*", "--ignore-metrics", "--m-prefix=m2"
             ],
             "env": {
                 "INFL_SEED": "0",
@@ -149,7 +149,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "infl", "--task=qnli", "--methods=lissa", "--with-grads"
+                "infl", "--task=qnli", "--methods=hf", "--with-grads", "--ignore-metrics", "--i-prefix=i2", "--m-prefix=m2"
             ],
             "env": {
                 "INFL_SEED": "0",
@@ -163,7 +163,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "infl-matrix", "--task=qnli", "--methods=datainf", "--mem-koef=1.5"
+                "infl-matrix", "--task=qnli", "--methods=hf", "--mem-koef=1.5", "--m-prefix=m2", "--i-prefix=i3", "--ignore-metrics"
             ],
             "env": {
                 "INFL_SEED": "0",

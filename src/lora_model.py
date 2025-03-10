@@ -219,11 +219,14 @@ def compute_grads(model, dataloader, device="cuda", bring_to_cpu=False):
     model.to(device)
     model.eval() # avoid dropout and batchnorm
     module_filter = ['lora_A', 'lora_B', 'modules_to_save.default.out_proj.weight']
+    # module_filter = ['modules_to_save.default.out_proj.weight']
     for k, v in model.named_parameters():
         if any(f in k for f in module_filter):
             grad = torch.empty((num_samples, v.numel()), device=device)
             module_grads[k] = grad
+            v.requires_grad = True
         else:
+            v.requires_grad = False
             pass         
     # collator = DataCollatorWithPadding(tokenizer, padding="longest", return_tensors="pt")
     # dataloader = DataLoader(dataset, shuffle=False, collate_fn=collate_fn, batch_size=1)        

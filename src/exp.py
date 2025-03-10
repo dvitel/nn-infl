@@ -146,8 +146,8 @@ def preprocess(task = 'qnli', noise_ratio = 0.2, tokenizer_name='roberta-large')
 def build_loaders(dataset_path, tokenizer_name, batch_size = 32, shuffle_train = True, 
                     filter_fn = None):
     datasets = load_from_disk(dataset_path)
-    trainset = datasets['train']  
-    valset = datasets['validation']
+    trainset = datasets['train'] #.select(range(100))
+    valset = datasets['infl'] #.select(range(100))
     if filter_fn is not None:
         trainset = filter_fn(trainset)
     trainset = trainset.remove_columns(['noise'])
@@ -209,14 +209,14 @@ def finetune(task = 'mrpc', low_rank = 4,
     with torch.no_grad():
         torch.cuda.empty_cache()
 
-def grads(task = 'mrpc', no_val = False, return_grads = False, config = None):
+def grads(task = 'mrpc', no_val = False, return_grads = False, config = None, m_prefix = 'm'):
     ''' Computes gradients for modules of the model'''
     if config is None:
         config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
         with open(config_path, 'r') as file:
             config = json.load(file)
     device = config['device']
-    model_path = os.path.join(cwd, f'm_{task}_{seed}')
+    model_path = os.path.join(cwd, f'{m_prefix}_{task}_{seed}')
     lora_model = load_pretrained_LORA_model(model_name_or_path=model_path)
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
     train_dataloader, eval_dataloader, _ = \
@@ -243,7 +243,7 @@ influence_methods = \
         "exact": compute_accurate_influences
     }
 
-def infl(task = 'mrpc', methods = "datainf,lissa", self_influence = False, with_grads = False):
+def infl(task = 'mrpc', methods = "hf", self_influence = False, with_grads = False, i_prefix='i', m_prefix='m', ignore_metrics = False):
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)
@@ -251,7 +251,7 @@ def infl(task = 'mrpc', methods = "datainf,lissa", self_influence = False, with_
     device = config['device']
 
     if with_grads:
-        gradients = grads(task = task, return_grads=True, config=config, no_val=self_influence)
+        gradients = grads(task = task, return_grads=True, config=config, no_val=self_influence, m_prefix = m_prefix)
     else:
         gradients = torch.load(os.path.join(cwd, f'g_{task}_{seed}.pt'))
     
@@ -289,11 +289,12 @@ def infl(task = 'mrpc', methods = "datainf,lissa", self_influence = False, with_
     config["infl_runtimes"] = runtimes
 
     for infl_method, infls in influences.items():
-        infl_path = os.path.join(cwd, f'i_{infl_method}_{task}_{seed}.pt')
+        infl_path = os.path.join(cwd, f'{i_prefix}_{infl_method}_{task}_{seed}.pt')
         torch.save(infls, infl_path)
 
-    with open(config_path, 'w') as file:
-        json.dump(config, file)
+    if not ignore_metrics:
+        with open(config_path, 'w') as file:
+            json.dump(config, file)
 
 
 def get_dataset_splits(dataset: Dataset, numel: int): 
@@ -673,6 +674,14 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
     lora_model.to(device)
     lora_model.eval()  
 
+    # module_filter = ['lora_A', 'lora_B', 'modules_to_save.default.out_proj.weight']
+    # # module_filter = ['modules_to_save.default.out_proj.weight']
+    # for param_name, param_param in lora_model.named_parameters():
+    #     if any([module in param_name for module in module_filter]):
+    #         param_param.requires_grad = True
+    #     else:
+    #         param_param.requires_grad = False
+
     active_modules = [(name, param.numel() * (torch.finfo(param.dtype).bits // 8), param) for name, param in lora_model.named_parameters() if param.requires_grad]
     active_modules.sort(key=lambda x: x[1], reverse=True)
 
@@ -680,7 +689,7 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
 
     datasets = load_from_disk(dataset_path) # add validation dataset 
 
-    trainset = datasets['train']
+    trainset = datasets['train'] #.select(range(100))
     trainset = trainset.remove_columns(['noise'])
     tokenizer = load_tokenizer(config['tokenizer_name'])
     collator = DataCollatorWithPadding(tokenizer=tokenizer, padding="longest", return_tensors="pt")  
@@ -688,7 +697,7 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
     # method_fn = matrix_infl_methods[method]
     method_names = [name for name in methods.split(',') if name in matrix_infl_methods]
 
-    valset = datasets['infl']
+    valset = datasets['infl'] #.select(range(100))
 
     common_tokens = {}
 
@@ -728,8 +737,8 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
     
     interaction_modules = set([module_name for int_matrices in interaction_matrices.values() for module_name in int_matrices.keys()])
 
-    all_active_modules = [(name, size, params) for name, size, params in active_modules if name in interaction_modules]    
-    
+    all_active_modules = [(name, size, params) for name, size, params in active_modules if name in interaction_modules]
+
     while len(all_active_modules) > 0:
         selected_module_count, train_size, test_size = pick_modules_and_split_size(all_active_modules, len(trainset), len(valset), method_memory_koef=mem_koef, memory_delta=mem_delta, device=device)
         cur_active_modules = all_active_modules[:selected_module_count]
@@ -860,8 +869,24 @@ def finetune2(task = 'mrpc',
 parser = argh.ArghParser()
 parser.add_commands([preprocess, finetune, grads, infl, infl_matrix, finetune2])
 
+def test_infl_vs_infl_matrix(file1: str, file2: str):
+    infl = torch.load(file1)
+    infl_matrices = torch.load(file2)
+
+    common_dict_keys = set(infl.keys()).intersection(infl_matrices.keys())
+    for key in common_dict_keys:
+        one_infl = infl[key]
+        one_infl_matrix = infl_matrices[key]
+        one_infl2 = torch.mean(one_infl_matrix, dim=0).cpu()
+        one_infl2.neg_()
+        assert torch.allclose(one_infl, one_infl2, atol=1e-5), f"Failed for {key}"
+        pass
+    print("All tests passed")
+
+
 if __name__ == '__main__':
     parser.dispatch()
+    # test_infl_vs_infl_matrix("data/dev/i2_hf_qnli_0.pt", "data/dev/i3_hf_qnli_0.pt")
 
 
 # import torch

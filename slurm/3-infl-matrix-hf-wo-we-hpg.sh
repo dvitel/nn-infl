@@ -6,7 +6,7 @@
 #SBATCH -p hpg-ai 
 #SBATCH --open-mode=append
 #SBATCH --gpus=1 # 1 GPU
-#SBATCH --array=0-3
+#SBATCH --array=0-0
 
 module load conda/24.7.1
 conda activate /home/dvitel.usf/torch-env
