@@ -166,7 +166,8 @@ def build_loaders(dataset_path, tokenizer_name, batch_size = 32, shuffle_train =
     
 def finetune(task = 'mrpc', low_rank = 4,
          device = 'cuda', lr = 3e-4, model = 'roberta-large', batch_size = 32,
-         num_epochs = 10, target_modules = ['value'], unfreeze_regex = None):
+         num_epochs = 10, target_modules = ['value'], unfreeze_regex = None, 
+         ignore_metrics = False, m_prefix = 'm'):
     ''' Fine tune specific model on specific task and save it to disk for later postprocessing'''
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
@@ -187,10 +188,11 @@ def finetune(task = 'mrpc', low_rank = 4,
 
     config['finetune'] = eval_metrics
     
-    with open(config_path, 'w') as file:
-        json.dump(config, file)       
+    if not ignore_metrics:
+        with open(config_path, 'w') as file:
+            json.dump(config, file)       
 
-    model_path = os.path.join(cwd, f'm_{task}_{seed}')
+    model_path = os.path.join(cwd, f'{m_prefix}_{task}_{seed}')
 
     ## next code is for testing weights preservation 
     # lora_model.to('cpu')
@@ -607,15 +609,16 @@ def common_we_topk(int_view: torch.Tensor, val_grad: torch.Tensor, train_grad: t
             train_token_scores = torch.norm(train_grad_clone[train_id, common_token_ids], dim = -1) / train_denom            
             train_token_ids_ids = torch.argsort(train_token_scores, descending=True)[:topk]
             train_token_ids = common_token_ids[train_token_ids_ids]
-            val_denom = torch.tensor([common_token_ids_dict[token_id][1] for token_id in common_token_ids_dict.keys()], device=train_grad.device, dtype=val_grad.dtype)
-            val_token_scores = torch.norm(val_grad_clone[val_id, common_token_ids], dim = -1) / val_denom
-            val_token_ids_ids = torch.argsort(val_token_scores, descending=True)[:topk]
-            val_token_ids = common_token_ids[val_token_ids_ids]
+
+            # val_denom = torch.tensor([common_token_ids_dict[token_id][1] for token_id in common_token_ids_dict.keys()], device=train_grad.device, dtype=val_grad.dtype)
+            # val_token_scores = torch.norm(val_grad_clone[val_id, common_token_ids], dim = -1) / val_denom
+            # val_token_ids_ids = torch.argsort(val_token_scores, descending=True)[:topk]
+            # val_token_ids = common_token_ids[val_token_ids_ids]
             uncommon_mask[:] = True
             uncommon_mask[train_token_ids] = False 
             train_grad_clone[train_id, uncommon_mask] = 0
-            uncommon_mask[:] = True
-            uncommon_mask[val_token_ids] = False 
+            # uncommon_mask[:] = True
+            # uncommon_mask[val_token_ids] = False 
             val_grad_clone[val_id, uncommon_mask] = 0
             del common_token_ids, train_denom, train_token_scores, train_token_ids_ids, val_denom, val_token_scores, val_token_ids_ids
     base_method_fn(int_view, val_grad_clone, train_grad_clone, train_shift=train_shift, val_shift=val_shift, common_tokens = common_tokens, **kwargs)
@@ -858,6 +861,21 @@ if __name__ == '__main__':
 
 
 # import torch
+
+# a = torch.rand((10, 100), dtype=torch.float)
+# b = torch.rand((11, 100), dtype=torch.float)
+
+# prods = torch.einsum('ik,jk->ij', a, b)
+
+# prods2 = torch.zeros((10, 11), dtype=torch.float)
+# for i in range(10):
+#     for j in range(11):
+#         prods2[i, j] = torch.dot(a[i], b[j])
+
+## Checked - it is true
+# assert torch.allclose(prods, prods2)  
+
+
 
 # a = torch.zeros(10, dtype=torch.int)
 
