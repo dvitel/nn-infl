@@ -19,6 +19,6 @@ task_cwd=/blue/anshumanc.usf/nn-infl/$task
 
 for run_id in {0..9}; do
     echo "Starting finetuning $task $run_id"
-    srun --export=ALL,INFL_SEED=$run_id,INFL_CWD=$task_cwd python /home/dvitel.usf/nn-infl/src/exp.py finetune --task=$task --model=roberta-large --num-epochs=10 --unfreeze-regex=.\*\\.word_embeddings\\..\*
+    srun --export=ALL,INFL_SEED=$run_id,INFL_CWD=$task_cwd python /home/dvitel.usf/nn-infl/src/exp.py finetune --task=$task --model=roberta-large --num-epochs=15 --unfreeze-regex=.\*\\.word_embeddings\\..\*
     echo "Done finetuning $task $run_id"
 done

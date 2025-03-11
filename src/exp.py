@@ -189,10 +189,13 @@ def finetune(task = 'mrpc', low_rank = 4,
                                 target_modules=target_modules, 
                                 low_rank=low_rank, unfreeze_modules_regex=unfreeze_regex)
     
-    model_path = os.path.join(cwd, f'{m_prefix}_{task}_{seed}')
+    best_model_path = os.path.join(cwd, f'{m_prefix}_b_{task}_{seed}')
+    last_model_path = os.path.join(cwd, f'{m_prefix}_l_{task}_{seed}')
 
     eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, infl_dataloader, device, num_epochs, lr,
-                                    compute_cancellation=True, compute_gold_val_predictions=True, checkpoint_path=model_path)
+                                    compute_cancellation=True, compute_gold_val_predictions=True, 
+                                    best_checkpoint_path=best_model_path,
+                                    last_checkpoint_path=last_model_path)
 
     config['finetune'] = eval_metrics
     
@@ -209,14 +212,15 @@ def finetune(task = 'mrpc', low_rank = 4,
     #         assert torch.allclose(param1, param2, rtol=1e-05, atol=1e-08), f'Parameters are not equal: {name1} {name2}'
 
     # lora_model.save_pretrained(model_path)
-    tokenizer.save_pretrained(model_path)
+    tokenizer.save_pretrained(best_model_path)
+    tokenizer.save_pretrained(last_model_path)
 
     del lora_model, train_dataloader, eval_dataloader
 
     with torch.no_grad():
         torch.cuda.empty_cache()
 
-def grads(task = 'mrpc', no_val = False, return_grads = False, config = None, m_prefix = 'm'):
+def grads(task = 'mrpc', no_val = False, return_grads = False, config = None, m_prefix = 'm_b'):
     ''' Computes gradients for modules of the model'''
     if config is None:
         config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
@@ -250,7 +254,7 @@ influence_methods = \
         "exact": compute_accurate_influences
     }
 
-def infl(task = 'mrpc', methods = "hf", self_influence = False, with_grads = False, i_prefix='i', m_prefix='m', ignore_metrics = False):
+def infl(task = 'mrpc', methods = "hf", self_influence = False, with_grads = False, i_prefix='i', m_prefix='m_b', ignore_metrics = False):
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)

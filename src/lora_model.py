@@ -97,7 +97,8 @@ def train_LORA_model(model: torch.nn.Module,
         lr=3e-4,
         compute_cancellation = False,
         compute_gold_val_predictions = False,
-        checkpoint_path = None):
+        best_checkpoint_path = None,
+        last_checkpoint_path = None):
     '''
     This function fine-tunes a model for GLUE classification tasks. 
     For text generation tasks, please see `notebooks/Influential_Data_Identification-Llama2-Math.ipynb`.
@@ -192,12 +193,19 @@ def train_LORA_model(model: torch.nn.Module,
 
         model.eval()
         infl_loss = []
+        infl_logits = None
         if infl_dataloader is not None:
+            infl_shift = 0
             for step, batch in enumerate(tqdm(infl_dataloader)):
                 batch.to(device)
                 with torch.no_grad():
                     outputs = model(**batch)
                 infl_loss.append(outputs.loss.item())
+                if infl_logits is None:
+                    infl_logits = torch.zeros((len(infl_dataloader.dataset), model.config.num_labels), device=outputs.logits.device, dtype = outputs.logits.dtype)
+                batch_size = outputs.logits.shape[0]
+                infl_logits[infl_shift:infl_shift+batch_size] = outputs.logits
+                infl_shift += batch_size
                 # predictions = outputs.logits.argmax(dim=-1)
                 # predictions, references = predictions, batch["labels"]
                 # infl_accuracy_metric.add_batch(
@@ -226,16 +234,19 @@ def train_LORA_model(model: torch.nn.Module,
 
         # eval_metric = metric.compute()
         accuracy = accuracy_metric.compute()
+        f1 = f1_metric.compute()
         if len(infl_loss) > 0:
             infl_loss_value = np.mean(infl_loss)
         else: 
             infl_loss_value = None
-        f1 = f1_metric.compute()
+        if (best_checkpoint_path is not None) and (infl_loss_value is not None) and (infl_loss_value <= best_infl_loss):
+            best_infl_loss = infl_loss_value
+            model.save_pretrained(best_checkpoint_path)
+            if infl_logits is not None:
+                infl_logits_path = f"{best_checkpoint_path}/infl_logits.pt"
+                torch.save(infl_logits, infl_logits_path)
         metrics = {**accuracy, **f1, "best_infl_loss": best_infl_loss, "infl_loss": infl_loss_value}
         print(f"Epoch {(epoch+1)}:", metrics)
-        if (checkpoint_path is not None) and (infl_loss_value is not None) and (infl_loss_value <= best_infl_loss):
-            best_infl_loss = infl_loss_value
-            model.save_pretrained(checkpoint_path)
         for key, item in metrics.items():
             eval_metrics.setdefault(key, []).append(item)
     if len(cancel_norm) > 0:
@@ -244,6 +255,11 @@ def train_LORA_model(model: torch.nn.Module,
         eval_metrics["cancel_abs"] = cancel_abs        
     if len(gold_val_predictions) > 0:
         eval_metrics["gold_val_predictions"] = gold_val_predictions
+    if last_checkpoint_path is not None:
+        model.save_pretrained(last_checkpoint_path)
+        if infl_logits is not None:
+            infl_logits_path = f"{last_checkpoint_path}/infl_logits.pt"
+            torch.save(infl_logits, infl_logits_path)
     return eval_metrics
 
 def compute_grads(model, dataloader, device="cuda", bring_to_cpu=False):
