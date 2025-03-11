@@ -184,7 +184,7 @@ def finetune(task = 'mrpc', low_rank = 4,
                                 target_modules=target_modules, 
                                 low_rank=low_rank, unfreeze_modules_regex=unfreeze_regex)
     eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, device, num_epochs, lr, task,
-                                    compute_cancellation=False, compute_gold_val_predictions=False)
+                                    compute_cancellation=True, compute_gold_val_predictions=True)
 
     config['finetune'] = eval_metrics
     
