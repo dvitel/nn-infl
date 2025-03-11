@@ -92,7 +92,7 @@ def train_LORA_model(model,
         eval_dataloader: DataLoader,
         device="cuda",
         num_epochs=10,
-        lr=3e-4,
+        lr=1e-3,
         task="mrpc",
         compute_cancellation = False,
         compute_gold_val_predictions = False):
@@ -109,7 +109,7 @@ def train_LORA_model(model,
     # Instantiate scheduler
     lr_scheduler = get_linear_schedule_with_warmup(
         optimizer=optimizer,
-        num_warmup_steps=0.06*(len(train_dataloader)*num_epochs),
+        num_warmup_steps=0.2*(len(train_dataloader)*num_epochs),
         num_training_steps=(len(train_dataloader)*num_epochs),
     )
 

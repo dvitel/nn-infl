@@ -165,7 +165,7 @@ def build_loaders(dataset_path, tokenizer_name, batch_size = 32, shuffle_train =
     return train_dataloader, eval_dataloader, tokenizer
     
 def finetune(task = 'mrpc', low_rank = 4,
-         device = 'cuda', lr = 3e-4, model = 'roberta-large', batch_size = 32,
+         device = 'cuda', lr = 1e-3, model = 'roberta-large', batch_size = 32,
          num_epochs = 10, target_modules = ['value'], unfreeze_regex = None, 
          ignore_metrics = False, m_prefix = 'm'):
     ''' Fine tune specific model on specific task and save it to disk for later postprocessing'''
