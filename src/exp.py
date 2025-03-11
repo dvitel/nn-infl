@@ -147,7 +147,8 @@ def build_loaders(dataset_path, tokenizer_name, batch_size = 32, shuffle_train =
                     filter_fn = None):
     datasets = load_from_disk(dataset_path)
     trainset = datasets['train'] #.select(range(100))
-    valset = datasets['infl'] #.select(range(100))
+    valset = datasets['validation'] #.select(range(100))
+    inflset = datasets['infl'] #.select(range(100))
     if filter_fn is not None:
         trainset = filter_fn(trainset)
     trainset = trainset.remove_columns(['noise'])
@@ -162,10 +163,14 @@ def build_loaders(dataset_path, tokenizer_name, batch_size = 32, shuffle_train =
                                  shuffle=False, 
                                  collate_fn=collator, 
                                  batch_size=batch_size)
-    return train_dataloader, eval_dataloader, tokenizer
+    infl_dataloader = DataLoader(inflset, #.select(range(100)),
+                                 shuffle=False, 
+                                 collate_fn=collator, 
+                                 batch_size=batch_size)    
+    return train_dataloader, eval_dataloader, infl_dataloader, tokenizer
     
 def finetune(task = 'mrpc', low_rank = 4,
-         device = 'cuda', lr = 1e-4, model = 'roberta-large', batch_size = 32,
+         device = 'cuda', lr = 3e-4, model = 'roberta-large', batch_size = 32,
          num_epochs = 10, target_modules = ['value'], unfreeze_regex = None, 
          ignore_metrics = False, m_prefix = 'm'):
     ''' Fine tune specific model on specific task and save it to disk for later postprocessing'''
@@ -177,14 +182,17 @@ def finetune(task = 'mrpc', low_rank = 4,
                   num_epochs=num_epochs, target_modules=target_modules, unfreeze_regex = unfreeze_regex)
 
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
-    train_dataloader, eval_dataloader, tokenizer = \
+    train_dataloader, eval_dataloader, infl_dataloader, tokenizer = \
         build_loaders(dataset_path, config['tokenizer_name'], batch_size)
 
     lora_model = build_LORA_model(model_name_or_path=model,
                                 target_modules=target_modules, 
                                 low_rank=low_rank, unfreeze_modules_regex=unfreeze_regex)
-    eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, device, num_epochs, lr, task,
-                                    compute_cancellation=True, compute_gold_val_predictions=True)
+    
+    model_path = os.path.join(cwd, f'{m_prefix}_{task}_{seed}')
+
+    eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, infl_dataloader, device, num_epochs, lr,
+                                    compute_cancellation=True, compute_gold_val_predictions=True, checkpoint_path=model_path)
 
     config['finetune'] = eval_metrics
     
@@ -192,7 +200,6 @@ def finetune(task = 'mrpc', low_rank = 4,
         with open(config_path, 'w') as file:
             json.dump(config, file)       
 
-    model_path = os.path.join(cwd, f'{m_prefix}_{task}_{seed}')
 
     ## next code is for testing weights preservation 
     # lora_model.to('cpu')
@@ -201,7 +208,7 @@ def finetune(task = 'mrpc', low_rank = 4,
     #     if "original_module" not in name1:
     #         assert torch.allclose(param1, param2, rtol=1e-05, atol=1e-08), f'Parameters are not equal: {name1} {name2}'
 
-    lora_model.save_pretrained(model_path)
+    # lora_model.save_pretrained(model_path)
     tokenizer.save_pretrained(model_path)
 
     del lora_model, train_dataloader, eval_dataloader
@@ -219,14 +226,14 @@ def grads(task = 'mrpc', no_val = False, return_grads = False, config = None, m_
     model_path = os.path.join(cwd, f'{m_prefix}_{task}_{seed}')
     lora_model = load_pretrained_LORA_model(model_name_or_path=model_path)
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
-    train_dataloader, eval_dataloader, _ = \
+    train_dataloader, _, infl_dataloader, _ = \
         build_loaders(dataset_path, config['tokenizer_name'], batch_size=1, 
                         shuffle_train=False)
     train_grads = compute_grads(lora_model, train_dataloader, device=device, bring_to_cpu=not return_grads)
     if no_val:
         val_grads = {}
     else:
-        val_grads = compute_grads(lora_model, eval_dataloader, device=device, bring_to_cpu=not return_grads)
+        val_grads = compute_grads(lora_model, infl_dataloader, device=device, bring_to_cpu=not return_grads)
 
     if return_grads:
         return {'train': train_grads, 'validation': val_grads}
@@ -847,13 +854,13 @@ def finetune2(task = 'mrpc',
         filter_fn = None
 
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
-    train_dataloader, eval_dataloader, _ = \
+    train_dataloader, eval_dataloader, _, _ = \
         build_loaders(dataset_path, config['tokenizer_name'], batch_size, filter_fn=filter_fn)
 
     lora_model = build_LORA_model(model_name_or_path=model,
                                 target_modules=target_modules, 
                                 low_rank=config['low_rank'])
-    eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, device, num_epochs, lr, task)
+    eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, None, device, num_epochs, lr)
 
     del lora_model, train_dataloader, eval_dataloader
 

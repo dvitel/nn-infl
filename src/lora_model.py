@@ -87,15 +87,16 @@ def load_pretrained_LORA_model(model_name_or_path, unfreeze_modules_regex: Optio
     model.print_trainable_parameters()
     return model
 
-def train_LORA_model(model,
+def train_LORA_model(model: torch.nn.Module,
         train_dataloader: DataLoader,
         eval_dataloader: DataLoader,
+        infl_dataloader: Optional[DataLoader],
         device="cuda",
         num_epochs=10,
-        lr=1e-4,
-        task="mrpc",
+        lr=3e-4,
         compute_cancellation = False,
-        compute_gold_val_predictions = False):
+        compute_gold_val_predictions = False,
+        checkpoint_path = None):
     '''
     This function fine-tunes a model for GLUE classification tasks. 
     For text generation tasks, please see `notebooks/Influential_Data_Identification-Llama2-Math.ipynb`.
@@ -103,7 +104,10 @@ def train_LORA_model(model,
     Params compute_cancellation and compute_gold_val_predictions are used for metrics from:
         https://proceedings.neurips.cc/paper_files/paper/2022/file/d07022783ff6f7bf7a288c207b7dcbd1-Paper-Conference.pdf
     '''
-    metric = evaluate.load("glue", task)
+    # metric = evaluate.load("glue", task)
+    accuracy_metric = evaluate.load("accuracy")
+    infl_accuracy_metric = evaluate.load("accuracy")
+    f1_metric = evaluate.load("f1")
     optimizer = AdamW(params=model.parameters(), lr=lr)
 
     # Instantiate scheduler
@@ -124,6 +128,7 @@ def train_LORA_model(model,
     cancel_norm = {}
     cancel_abs = {}
     gold_val_predictions = []
+    best_accuracy = 0
     for epoch in range(num_epochs):
         model.train()
         if (epoch == (num_epochs - 1)) and compute_cancellation: 
@@ -185,13 +190,29 @@ def train_LORA_model(model,
             del weights_before, weights_after, weights_delta, grads_abs, weights_delta_abs, weights_delta_norms
 
         model.eval()
+        if infl_dataloader is not None:
+            for step, batch in enumerate(tqdm(infl_dataloader)):
+                batch.to(device)
+                with torch.no_grad():
+                    outputs = model(**batch)
+                predictions = outputs.logits.argmax(dim=-1)
+                predictions, references = predictions, batch["labels"]
+                infl_accuracy_metric.add_batch(
+                    predictions=predictions,
+                    references=references,
+                )
+
         for step, batch in enumerate(tqdm(eval_dataloader)):
             batch.to(device)
             with torch.no_grad():
                 outputs = model(**batch)
             predictions = outputs.logits.argmax(dim=-1)
             predictions, references = predictions, batch["labels"]
-            metric.add_batch(
+            accuracy_metric.add_batch(
+                predictions=predictions,
+                references=references,
+            )
+            f1_metric.add_batch(
                 predictions=predictions,
                 references=references,
             )
@@ -200,9 +221,16 @@ def train_LORA_model(model,
                 batch_gold_preds = outputs.logits[torch.arange(outputs.logits.shape[0]), references].cpu().tolist()
                 gold_val_predictions.extend(batch_gold_preds)
 
-        eval_metric = metric.compute()
-        print(f"Epoch {(epoch+1)}:", eval_metric)
-        for key, item in eval_metric.items():
+        # eval_metric = metric.compute()
+        accuracy = accuracy_metric.compute()
+        infl_accuracy = infl_accuracy_metric.compute()["accuracy"]
+        f1 = f1_metric.compute()
+        metrics = {**accuracy, **f1, "infl_accuracy": infl_accuracy}
+        print(f"Epoch {(epoch+1)}:", metrics)
+        if (checkpoint_path is not None) and (infl_accuracy >= best_accuracy):
+            best_accuracy = infl_accuracy
+            model.save_pretrained(checkpoint_path)
+        for key, item in metrics.items():
             eval_metrics.setdefault(key, []).append(item)
     if len(cancel_norm) > 0:
         eval_metrics["cancel_norm"] = cancel_norm

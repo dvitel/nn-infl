@@ -115,13 +115,13 @@
             }
         },                             
         {
-            "name": "Fitetune: GLUE QNLI on DistilRoberta",
+            "name": "Finetune: GLUE QNLI on DistilRoberta",
             "type": "debugpy",
             "request": "launch",
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "finetune", "--task=qnli", "--model=distilbert/distilroberta-base", "--num-epochs=2", "--unfreeze-regex=.*\\.word_embeddings\\..*", "--ignore-metrics", "--m-prefix=m2"
+                "finetune", "--task=qnli", "--model=distilbert/distilroberta-base", "--num-epochs=4", "--unfreeze-regex=.*\\.word_embeddings\\..*", "--ignore-metrics", "--m-prefix=m2"
             ],
             "env": {
                 "INFL_SEED": "0",
