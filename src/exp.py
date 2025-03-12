@@ -610,31 +610,26 @@ def common_we_topk(int_view: torch.Tensor, val_grad: torch.Tensor, train_grad: t
     '''
     # NOTE: it is infeasible to allocate mask tensor = 50K * 1K * 5K * 8 ~ 2K GB of memory 
     # grad_mask = torch.zeros((train_grad.shape[0], val_grad.shape[0], train_grad.shape[1]), dtype=train_grad.device, device=train_grad.device)
-    uncommon_mask = torch.ones(train_grad.shape[1], device=train_grad.device, dtype=torch.bool)
-    train_grad_clone = train_grad.clone()
-    val_grad_clone = val_grad.clone()
+    train_grad_repr = torch.zeros((train_grad.shape[0], topk, train_grad.shape[-1]), device=train_grad.device, dtype=train_grad.dtype)
+    val_grad_repr = torch.zeros((val_grad.shape[0], topk, val_grad.shape[-1]), device=val_grad.device, dtype=val_grad.dtype)
     for train_id in range(train_grad.shape[0]):
         for val_id in range(val_grad.shape[0]):
             common_token_ids_dict = common_tokens.get((train_shift + train_id, val_shift + val_id), {})
             common_token_ids = torch.tensor(list(common_token_ids_dict.keys()), device=train_grad.device, dtype=torch.int)
             train_denom = torch.tensor([common_token_ids_dict[token_id][0] for token_id in common_token_ids_dict.keys()], device=train_grad.device, dtype=train_grad.dtype)
-            train_token_scores = torch.norm(train_grad_clone[train_id, common_token_ids], dim = -1) / train_denom            
+            train_token_scores = torch.norm(train_grad[train_id, common_token_ids], dim = -1) / train_denom            
             train_token_ids_ids = torch.argsort(train_token_scores, descending=True)[:topk]
             train_token_ids = common_token_ids[train_token_ids_ids]
 
-            # val_denom = torch.tensor([common_token_ids_dict[token_id][1] for token_id in common_token_ids_dict.keys()], device=train_grad.device, dtype=val_grad.dtype)
-            # val_token_scores = torch.norm(val_grad_clone[val_id, common_token_ids], dim = -1) / val_denom
-            # val_token_ids_ids = torch.argsort(val_token_scores, descending=True)[:topk]
-            # val_token_ids = common_token_ids[val_token_ids_ids]
-            uncommon_mask[:] = True
-            uncommon_mask[train_token_ids] = False 
-            train_grad_clone[train_id, uncommon_mask] = 0
-            # uncommon_mask[:] = True
-            # uncommon_mask[val_token_ids] = False 
-            val_grad_clone[val_id, uncommon_mask] = 0
+            val_denom = torch.tensor([common_token_ids_dict[token_id][1] for token_id in common_token_ids_dict.keys()], device=train_grad.device, dtype=val_grad.dtype)
+            val_token_scores = torch.norm(val_grad[val_id, common_token_ids], dim = -1) / val_denom
+            val_token_ids_ids = torch.argsort(val_token_scores, descending=True)[:topk]
+            val_token_ids = common_token_ids[val_token_ids_ids]
+            train_grad_repr[train_id, :len(train_token_ids)] = train_grad[train_id, train_token_ids]
+            val_grad_repr[val_id, :len(val_token_ids)] = val_grad[val_id, val_token_ids]
             del common_token_ids, train_denom, train_token_scores, train_token_ids_ids, val_denom, val_token_scores, val_token_ids_ids
-    base_method_fn(int_view, val_grad_clone, train_grad_clone, train_shift=train_shift, val_shift=val_shift, common_tokens = common_tokens, **kwargs)
-    del uncommon_mask, train_grad_clone, val_grad_clone
+    base_method_fn(int_view, val_grad_repr, train_grad_repr, train_shift=train_shift, val_shift=val_shift, common_tokens = common_tokens, **kwargs)
+    del train_grad_repr, val_grad_repr
     pass
 
 # def matrix_tf_idf_head():
@@ -646,7 +641,7 @@ def common_we_topk(int_view: torch.Tensor, val_grad: torch.Tensor, train_grad: t
 matrix_infl_methods = {
     "hf": matrix_hf_fn,
     "hf_we_": partial(common_we, base_method_fn=matrix_hf_fn),
-    "hw_we_topk_10": partial(common_we_topk, base_method_fn=matrix_hf_fn, topk=10),
+    "hf_we_topk_10": partial(common_we_topk, base_method_fn=matrix_hf_fn, topk=10),
     # "hw_we_topk_20": partial(common_we_topk, base_method_fn=matrix_hf_fn, topk=20),
     "cos": matrix_cos_fn,
     # "cos_we": partial(common_we, base_method_fn=matrix_cos_fn),
@@ -901,6 +896,16 @@ if __name__ == '__main__':
 
 
 # import torch
+
+# a = torch.zeros((1, 100), dtype=torch.float)
+# b = torch.zeros((1, 100), dtype=torch.float)
+# a[0, 0] = 1
+# b[0, 0] = 1
+# b[0, 1] = 1
+# tmp_prods = torch.einsum('ik,jk->ij', a, b)
+# res = tmp_prods / torch.norm(a, dim=-1) / torch.norm(b, dim=-1).view(-1, 1)
+# print(res)
+
 
 # a = torch.rand((10, 100), dtype=torch.float)
 # b = torch.rand((11, 100), dtype=torch.float)

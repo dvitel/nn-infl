@@ -21,10 +21,10 @@ task_cwd=/blue/anshumanc.usf/nn-infl/$task
 method_name='hf_we_'
 mem_koef=2.2
 
-for run_id in {0..9}; do
+for run_id in {0..4}; do
 
     echo "Infl matrix $task $run_id $method_name"
-    srun --export=ALL,INFL_SEED=$run_id,INFL_CWD=$task_cwd python /home/dvitel.usf/nn-infl/src/exp.py infl-matrix --task=$task --methods=$method_name --mem-koef=$mem_koef
+    srun --export=ALL,INFL_SEED=$run_id,INFL_CWD=$task_cwd python /home/dvitel.usf/nn-infl/src/exp.py infl-matrix --task=$task --methods=$method_name --mem-koef=$mem_koef --m-prefix=m_b --i-prefix=i_b
     echo "----- Done $task $run_id $method_name"
 
 done

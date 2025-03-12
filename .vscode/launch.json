@@ -163,7 +163,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "infl-matrix", "--task=qnli", "--methods=hf", "--mem-koef=1.5", "--m-prefix=m2", "--i-prefix=i3", "--ignore-metrics"
+                "infl-matrix", "--task=qnli", "--methods=hf_we_topk_10", "--mem-koef=2.1", "--m-prefix=m2_b", "--i-prefix=i_b"
             ],
             "env": {
                 "INFL_SEED": "0",
