@@ -21,6 +21,9 @@ from transformers import AutoTokenizer, DataCollatorWithPadding
 from datasets import load_dataset, load_from_disk, Dataset
 from torch.utils.data import DataLoader
 
+if torch.cuda.is_available():
+    torch.cuda.init()
+
 seed = int(os.environ.get("INFL_SEED", 0))
 cwd = os.environ.get("INFL_CWD", "./data/dev")
 
