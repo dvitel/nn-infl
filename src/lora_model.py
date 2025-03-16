@@ -235,8 +235,9 @@ def train_LORA_model(model: torch.nn.Module,
         # eval_metric = metric.compute()
         accuracy = accuracy_metric.compute()
         f1 = f1_metric.compute()
+        metrics = {**accuracy, **f1}
         if len(infl_loss) > 0:
-            infl_loss_value = np.mean(infl_loss)
+            infl_loss_value = np.mean(infl_loss)            
         else: 
             infl_loss_value = None
         if (best_checkpoint_path is not None) and (infl_loss_value is not None) and (infl_loss_value <= best_infl_loss):
@@ -245,7 +246,8 @@ def train_LORA_model(model: torch.nn.Module,
             if infl_logits is not None:
                 infl_logits_path = f"{best_checkpoint_path}/infl_logits.pt"
                 torch.save(infl_logits, infl_logits_path)
-        metrics = {**accuracy, **f1, "best_infl_loss": best_infl_loss, "infl_loss": infl_loss_value}
+        if infl_loss_value is not None:
+            metrics.update(best_infl_loss = best_infl_loss, infl_loss = infl_loss_value)
         print(f"Epoch {(epoch+1)}:", metrics)
         for key, item in metrics.items():
             eval_metrics.setdefault(key, []).append(item)

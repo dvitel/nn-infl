@@ -515,7 +515,7 @@ def matrix_datainf_one_sample_fn(int_view: torch.Tensor, val_grad: torch.Tensor,
 
 def matrix_datainf_continuation(module_int_matrices: dict[str, torch.Tensor], module_val_train_products: dict[str, torch.Tensor], 
                                     module_train_train_products: dict[str, torch.Tensor], module_num_params: dict[str, int], 
-                                    lambda_const_param, **_) -> None:
+                                    lambda_const_param, use_orig_def, **_) -> None:
     for module_name, int_matrix in module_int_matrices.items():
         num_train = int_matrix.shape[1]
         num_params = module_num_params[module_name]
@@ -528,7 +528,10 @@ def matrix_datainf_continuation(module_int_matrices: dict[str, torch.Tensor], mo
         train_train_prods /= train_train_diag
         tmp_prods = torch.einsum("ji,ki -> jk", val_train_prods, train_train_prods) 
         tmp_prods /= lambda_const_n
-        val_train_prods /= lambda_const #NOTE: here we have difference from original impl which divides by n 
+        if use_orig_def:
+            val_train_prods /= lambda_const_n
+        else:
+            val_train_prods /= lambda_const #NOTE: here we have difference from original impl which divides by n in addition
         int_matrix[:] = val_train_prods - tmp_prods # we ignore negation 
         del tmp_prods, train_train_diag
         del val_train_prods, train_train_prods
@@ -537,7 +540,7 @@ def matrix_datainf_continuation(module_int_matrices: dict[str, torch.Tensor], mo
 # NOTE: the following method does not work because we need to iterate through training samples twice if we want to implement datainf
 # it only works when train_grad contains all training samples
 def matrix_datainf_fn(__: torch.Tensor, val_grad: torch.Tensor, train_grad: torch.Tensor, lambda_const_param = 10,
-                        *, module_name: str, infl_context: dict, train_shift: int, val_shift: int, full_train_size: int, full_val_size: int,
+                        *, use_orig_def = False, module_name: str, infl_context: dict, train_shift: int, val_shift: int, full_train_size: int, full_val_size: int,
                         **_) -> None:
     ''' Here we just prepare necessary vector products, which will be used in matrix_datainf_continuation '''
     if "continuation" not in infl_context:
@@ -546,6 +549,7 @@ def matrix_datainf_fn(__: torch.Tensor, val_grad: torch.Tensor, train_grad: torc
         infl_context["module_train_train_products"] = {}
         infl_context["module_num_params"] = {}
         infl_context["lambda_const_param"] = lambda_const_param
+        infl_context["use_orig_def"] = use_orig_def
 
     val_grad_flat = val_grad.view(val_grad.shape[0], -1)
     train_grad_flat = train_grad.view(train_grad.shape[0], -1)
@@ -652,6 +656,7 @@ matrix_infl_methods = {
     # "cov_we": partial(common_we, base_method_fn=matrix_cov_fn),
     "datainf_one": matrix_datainf_one_sample_fn,
     'datainf': matrix_datainf_fn,
+    'datainf0': partial(matrix_datainf_fn, use_orig_def=True)
     # "datainf_we": partial(common_we, base_method_fn=matrix_datainf_fn),
     # "lissa": matrix_lissa_fn,
     # "lissa_we": partial(common_we, base_method_fn=matrix_lissa_fn),
@@ -737,11 +742,12 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
             with open(common_tokens_ds, 'wb') as file:
                 pickle.dump(common_tokens, file)
 
+    methods_without_we = ['datainf', 'datainf0' ]
     interaction_matrices = {method_name: {module_name: torch.zeros((len(valset), len(trainset)), device=device)                                             
                                             for module_name, _, module_params in active_modules
-                                            if (method_name == 'datainf' and (module_params.numel() < 100000)) or
-                                                ((method_name != 'datainf') and ('_we_' not in method_name)) or 
-                                                ((method_name != 'datainf') and ('_we_' in method_name) and ('.word_embeddings.' in module_name))} 
+                                            if ((method_name in methods_without_we) and (module_params.numel() < 100000)) or
+                                                ((method_name not in methods_without_we) and ('_we_' not in method_name)) or 
+                                                ((method_name not in methods_without_we) and ('_we_' in method_name) and ('.word_embeddings.' in module_name))} 
                                 for method_name in method_names}
     
     interaction_modules = set([module_name for int_matrices in interaction_matrices.values() for module_name in int_matrices.keys()])
@@ -799,43 +805,70 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
     #     json.dump(config, file)
     #     fcntl.flock(file, fcntl.LOCK_UN)    
 
+
+def sum_mean_infl_atrices_agg(infl_matrices: list[torch.Tensor]):
+    ''' each matrix has 2 dims - infl samples vs train samples '''
+    sum_infl_matrix = None 
+    for infl_matrix in infl_matrices:
+        if sum_infl_matrix is None:
+            sum_infl_matrix = infl_matrix.clone()
+        else:
+            sum_infl_matrix += infl_matrix
+    train_means = torch.mean(sum_infl_matrix, dim=0)
+    return train_means
+
+
+agg_methods = {
+    "sum_mean": sum_mean_infl_atrices_agg
+}
+
 def finetune2(task = 'mrpc',
-         num_epochs = 10, filter_method='infl', infl_method='datainf', module_pattern='', filter_perc = 0.7):
+         filter_method='infl', infl_method='datainf', module_pattern='', 
+         filter_perc = 0.3, i_prefix='i', unfreeze_regex = None, agg_method = 'sum_mean', tag=''):
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)    
-    config.update(finetune2=dict(num_epochs=num_epochs, filter_method=filter_method,
-                                 infl_method=infl_method, module_pattern=module_pattern, filter_perc=filter_perc))
+    finetune2_config=dict(filter_method=filter_method, task = task, seed = seed,
+                                 infl_method=infl_method, module_pattern=module_pattern, 
+                                 filter_perc=filter_perc, agg_method=agg_method, i_prefix = i_prefix,
+                                 unfreeze_regex=unfreeze_regex)
     print(f"Finetune with modules: {module_pattern}")
+    num_epochs = config['num_epochs']
     device = config['device']
     lr = config['lr']
     model = config['model']
     batch_size = config['batch_size']
     target_modules = config['target_modules']
+    cancel_abs = []
+    cancel_norm = []
     if filter_method == "infl":
-        influences = torch.load(os.path.join(cwd, f'i_{infl_method}_{task}_{seed}.pt'))
+        influences = torch.load(os.path.join(cwd, f'{i_prefix}_{infl_method}_{task}_{seed}.pt'))
 
         module_names = [] # all modules
+        influence_matrices = []
         if module_pattern == '':
-            influence = influences[''].to(device)
+            for module in influences:
+                influence_matrices.append(influences[module])
+                cancel_abs.append(config['finetune']['cancel_abs'][module])
+                cancel_norm.append(config['finetune']['cancel_norm'][module])
+            finetune2_config['module_names'] = []
         else:
             pattern = re.compile(module_pattern)
-            influence = None
             for module in influences:
                 if pattern.match(module): 
-                    if influence is None:
-                        influence = influences[module].to(device)
-                    else:
-                        influence += influences[module].to(device)
+                    influence_matrices.append(influences[module])
+                    cancel_abs.append(config['finetune']['cancel_abs'][module])
+                    cancel_norm.append(config['finetune']['cancel_norm'][module])
                     module_names.append(module)
-        config['finetune2']['module_names'] = module_names
+        finetune2_config['module_names'] = module_names
         
         # fine-tuning models
 
         def infl_filter(train_dataset):
+            influence = agg_methods[agg_method](influence_matrices)
             high_to_low_quality = torch.argsort(influence)
             filter_len = int(filter_perc*len(high_to_low_quality))
-            filtered_indexes = high_to_low_quality[:filter_len].cpu().numpy()
+            filtered_indexes = high_to_low_quality[filter_len:].cpu().numpy()
             return train_dataset.select(filtered_indexes)
         filter_fn = infl_filter
     elif filter_method == 'rand':
@@ -861,15 +894,24 @@ def finetune2(task = 'mrpc',
 
     lora_model = build_LORA_model(model_name_or_path=model,
                                 target_modules=target_modules, 
-                                low_rank=config['low_rank'])
-    eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, None, device, num_epochs, lr)
+                                low_rank=config['low_rank'],
+                                unfreeze_modules_regex=unfreeze_regex)
+    eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, None, device, num_epochs, lr,
+                                    compute_gold_val_predictions=True)
 
     del lora_model, train_dataloader, eval_dataloader
 
     metric_file = os.path.join(cwd, f'metrics.jsonlist')
+    old_gold_val_predictions = np.array(config['finetune']['gold_val_predictions'])
+    new_gold_val_predictions = np.array(eval_metrics['gold_val_predictions'])
+    logits_change = (new_gold_val_predictions - old_gold_val_predictions).mean()
+    eval_metrics['logits_change'] = logits_change
+    eval_metrics['cancel_abs'] = np.mean(cancel_abs)
+    eval_metrics['cancel_norm'] = np.mean(cancel_norm)
+    del eval_metrics['gold_val_predictions']
     with open(metric_file, "a") as f:                
         fcntl.flock(f, fcntl.LOCK_EX)
-        f.write(json.dumps({**config, "metrics": eval_metrics}) + "\n")
+        f.write(json.dumps({**eval_metrics, 'config': finetune2_config, 'tag': tag}) + "\n")
         fcntl.flock(f, fcntl.LOCK_UN)    
 
     with torch.no_grad():

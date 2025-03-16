@@ -163,7 +163,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "infl-matrix", "--task=qnli", "--methods=hf_we_topk_10", "--mem-koef=2.1", "--m-prefix=m2_b", "--i-prefix=i_b"
+                "infl-matrix", "--task=qnli", "--methods=datainf", "--mem-koef=2.1", "--m-prefix=m2_b", "--i-prefix=i_b"
             ],
             "env": {
                 "INFL_SEED": "0",
@@ -177,7 +177,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "finetune2", "--task=qnli", "--filter-method=infl", "--infl-method=hf", "--num-epochs=1", "--module-pattern=.*\\.layer\\.(1[6-9]|2[0-3])\\..*\\.lora_(A|B)\\..*"
+                "finetune2", "--task=qnli", "--filter-method=infl", "--infl-method=hf", "--module-pattern=.*\\.word_embeddings\\..*", "--i-prefix=i_b", "--unfreeze-regex=.*\\.word_embeddings\\..*"
             ],
             "env": {
                 "INFL_SEED": "0",
