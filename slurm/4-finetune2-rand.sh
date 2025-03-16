@@ -1,7 +1,7 @@
 #!/bin/bash -l
-#SBATCH --job-name=tun2-hf
+#SBATCH --job-name=tun2-rand
 #SBATCH --time=72:00:00
-#SBATCH --output tun2-hf-%j.out
+#SBATCH --output tun2-rand-%j.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl
 #SBATCH -p hpg-ai
 #SBATCH --open-mode=append
