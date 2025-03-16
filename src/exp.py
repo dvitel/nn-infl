@@ -824,7 +824,16 @@ agg_methods = {
 
 def finetune2(task = 'mrpc',
          filter_method='infl', infl_method='datainf', module_pattern='', 
-         filter_perc = 0.3, i_prefix='i', unfreeze_regex = None, agg_method = 'sum_mean', tag=''):
+         filter_perc = 0.3, i_prefix='i', unfreeze_regex = None, agg_method = 'sum_mean', tag='',
+         seed2: int = 0):
+    
+    if seed2 != 0: # seed is used for loading files, but seed2 to change init state
+        rand_seed = seed + seed2
+        random.seed(rand_seed)
+        np.random.seed(rand_seed)
+        torch.manual_seed(rand_seed)
+        torch.cuda.manual_seed(rand_seed)
+        torch.cuda.manual_seed_all(rand_seed)            
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)    
