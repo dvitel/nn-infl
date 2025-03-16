@@ -873,7 +873,7 @@ def finetune2(task = 'mrpc',
         filter_fn = infl_filter
     elif filter_method == 'rand':
         def rand_filter(train_dataset):
-            filter_len = int(filter_perc*len(train_dataset))
+            filter_len = int((1 - filter_perc)*len(train_dataset))
             filtered_indexes = np.random.choice(len(train_dataset), filter_len, replace=False)
             return train_dataset.select(filtered_indexes)
         filter_fn = rand_filter        
