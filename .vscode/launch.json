@@ -177,7 +177,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "finetune2", "--task=qnli", "--filter-method=infl", "--infl-method=hf", "--module-pattern=.*\\.word_embeddings\\..*", "--i-prefix=i_b", "--unfreeze-regex=.*\\.word_embeddings\\..*"
+                "finetune2", "--task=qnli", "--filter-method=denoise", "--infl-method=cos", "--module-pattern=.*\\.layer\\.(1[6-9]|2[0-3])\\..*\\.lora_(A|B)\\..*", "--i-prefix=i_b", "--unfreeze-regex=.*\\.word_embeddings\\..*", "--seed2=10"
             ],
             "env": {
                 "INFL_SEED": "0",

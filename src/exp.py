@@ -887,12 +887,14 @@ def finetune2(task = 'mrpc',
             return train_dataset.select(filtered_indexes)
         filter_fn = rand_filter        
     elif filter_method == 'denoise':
-        def denoise_map(example):
-            if example['noise']:
-                example['labels'] = 1 - example['labels'] 
-            return example               
+        # def denoise_map(example):
+        #     if example['noise']:
+        #         example['labels'] = 1 - example['labels'] 
+        #     return example               
         def denoise_filter(train_dataset):
-            return train_dataset.map(denoise_map)
+            noise_arr = np.array(train_dataset['noise'])
+            selected_indexes = np.where(noise_arr == 0)[0]
+            return train_dataset.select(selected_indexes)
         filter_fn = denoise_filter
     else:
         filter_fn = None
