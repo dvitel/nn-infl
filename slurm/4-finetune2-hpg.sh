@@ -118,7 +118,7 @@ for method_name in "${new_method_names[@]}"; do
 done
 
 base_method_names=('rand' 'denoise')
-for method_name in "${new_method_names[@]}"; do
+for method_name in "${base_method_names[@]}"; do
     for seed2 in "${seeds[@]}"; do 
         for run_id in {0..4}; do
             echo "Starting finetune2 WE $task $run_id $seed2 $method_name"
