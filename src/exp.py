@@ -840,7 +840,7 @@ def finetune2(task = 'mrpc',
     finetune2_config=dict(filter_method=filter_method, task = task, seed = seed,
                                  infl_method=infl_method, module_pattern=module_pattern, 
                                  filter_perc=filter_perc, agg_method=agg_method, i_prefix = i_prefix,
-                                 unfreeze_regex=unfreeze_regex)
+                                 unfreeze_regex=unfreeze_regex, seed2 = seed2)
     print(f"Finetune with modules: {module_pattern}")
     num_epochs = config['num_epochs']
     device = config['device']
@@ -917,8 +917,10 @@ def finetune2(task = 'mrpc',
     new_gold_val_predictions = np.array(eval_metrics['gold_val_predictions'])
     logits_change = (new_gold_val_predictions - old_gold_val_predictions).mean()
     eval_metrics['logits_change'] = logits_change
-    eval_metrics['cancel_abs'] = np.mean(cancel_abs)
-    eval_metrics['cancel_norm'] = np.mean(cancel_norm)
+    if len(cancel_abs) > 0:
+        eval_metrics['cancel_abs'] = np.mean(cancel_abs)
+    if len(cancel_norm) > 0:
+        eval_metrics['cancel_norm'] = np.mean(cancel_norm)
     del eval_metrics['gold_val_predictions']
     with open(metric_file, "a") as f:                
         fcntl.flock(f, fcntl.LOCK_EX)

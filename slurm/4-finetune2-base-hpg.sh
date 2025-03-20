@@ -25,7 +25,7 @@ for method_name in "${base_method_names[@]}"; do
     for seed2 in "${seeds[@]}"; do 
         for run_id in {0..4}; do
             echo "Starting finetune2 WE $task $run_id $seed2 $method_name"
-            INFL_SEED=$run_id INFL_CWD=$task_cwd python /home/dvitel.usf/nn-infl/src/exp.py finetune2 --task=$task --filter-method=$method_name --unfreeze-regex=.\*\\.word_embeddings\\..\* --tag=$method_name --seed2=$seed2
+            INFL_SEED=$run_id INFL_CWD=$task_cwd python /home/dvitel.usf/nn-infl/src/exp.py finetune2 --task=$task --filter-method=$method_name --unfreeze-regex=.\*\\.word_embeddings\\..\* --tag=$method_name --i-prefix=i_b --seed2=$seed2
             echo "Done finetune2 WE $task $run_id $seed2 $method_name"
         done    
     done
