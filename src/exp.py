@@ -174,22 +174,23 @@ def build_loaders(dataset_path, tokenizer_name, batch_size = 32, shuffle_train =
     
 def finetune(task = 'mrpc', low_rank = 4,
          device = 'cuda', lr = 3e-4, model = 'roberta-large', batch_size = 32,
-         num_epochs = 10, target_modules = ['value'], unfreeze_regex = None, 
+         num_epochs = 10, lora_targets: str = 'value', unfreeze_regex = None, 
          ignore_metrics = False, m_prefix = 'm'):
     ''' Fine tune specific model on specific task and save it to disk for later postprocessing'''
+    lora_targets = lora_targets.split(',')
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)
 
     config.update(low_rank=low_rank, device=device, lr=lr, model=model, batch_size=batch_size,
-                  num_epochs=num_epochs, target_modules=target_modules, unfreeze_regex = unfreeze_regex)
+                  num_epochs=num_epochs, target_modules=lora_targets, unfreeze_regex = unfreeze_regex)
 
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
     train_dataloader, eval_dataloader, infl_dataloader, tokenizer = \
         build_loaders(dataset_path, config['tokenizer_name'], batch_size)
 
     lora_model = build_LORA_model(model_name_or_path=model,
-                                target_modules=target_modules, 
+                                target_modules=lora_targets, 
                                 low_rank=low_rank, unfreeze_modules_regex=unfreeze_regex)
     
     best_model_path = os.path.join(cwd, f'{m_prefix}_b_{task}_{seed}')

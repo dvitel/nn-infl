@@ -1,3 +1,4 @@
+import os
 import re
 from typing import Optional
 import numpy as np
@@ -50,13 +51,38 @@ def unfreeze_modules(model, unfreeze_modules_regex: Optional[str] = None):
         
 def build_LORA_model(model_name_or_path, target_modules, low_rank, unfreeze_modules_regex: Optional[str] = None):
     '''
-    This function fine-tunes a model for classification tasks. 
-    For text generation tasks, please see `notebooks/Influential_Data_Identification-Llama2-Math.ipynb`.
-
     unfreeze_modules - list of additional modules to unfreeze
     '''
+
+    model_config = {}
+
+    if "llama" in model_name_or_path:
+
+        # ["q_proj", "v_proj"]
+
+        model_config["torch_dtype"] = torch.bfloat16 
+        # NOTE: should we include qunatization?
+        # model_config["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True, load_in_4bit=False)
+        model_config["offload_folder"] = os.path.join(os.environ['HF_HOME'], ".offload") 
+        model_config["offload_state_dict"] = True
+        
+    #     # load a base model
+    #     base_model = LlamaForCausalLM.from_pretrained(
+    #         model_name_or_path,
+    #         # quantization_config=quantization_config,
+    #         torch_dtype=torch.bfloat16,
+    #         offload_folder="offload",
+    #         offload_state_dict=True,
+    #     )
+
+    #     # load a pre-trained model.
+    #     self.model = PeftModel.from_pretrained(base_model, self.adapter_path, is_trainable=True)
+    #     self.finetuned_config = LoraConfig.from_pretrained(pretrained_model_name_or_path=self.adapter_path)
+
+    # else:
     model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path,
-                                                                    return_dict=True)
+                                                                    return_dict=True,
+                                                                    **model_config)
     model.config.use_cache = False
     model.config.pad_token_id = model.config.eos_token_id
         
