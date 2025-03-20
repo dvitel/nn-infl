@@ -278,7 +278,7 @@ def train_LORA_model(model: torch.nn.Module,
         else: 
             infl_loss_value = None
             infl_accuracy = None
-        if (best_checkpoint_path is not None) and (infl_accuracy is not None) and (infl_accuracy <= best_infl_accuracy):
+        if (best_checkpoint_path is not None) and (infl_accuracy is not None) and (infl_accuracy >= best_infl_accuracy):
             best_infl_loss = infl_loss_value
             best_infl_accuracy = infl_accuracy
             model.save_pretrained(best_checkpoint_path)
