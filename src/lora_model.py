@@ -42,12 +42,19 @@ import evaluate
     #     self.task=task
     #     self.low_rank=low_rank
 
-def unfreeze_modules(model, unfreeze_modules_regex: Optional[str] = None):
+def dropout_forward_hook(module: torch.nn.Module, input, output, p = 0.25):
+    result = torch.nn.functional.dropout(output, p=p, training=module.training)
+    return result
+
+def unfreeze_modules(model: torch.nn.Module, unfreeze_modules_regex: Optional[str] = None):
     if unfreeze_modules_regex:
         unfreeze_pattern = re.compile(unfreeze_modules_regex)
         for module_name, module_params in model.named_parameters():
             if unfreeze_pattern.match(module_name):
                 module_params.requires_grad = True
+                module_true_name = ".".join(module_name.split(".")[:-1])
+                submodule = model.get_submodule(module_true_name)
+                submodule.register_forward_hook(dropout_forward_hook)
         
 def build_LORA_model(model_name_or_path, target_modules, low_rank, unfreeze_modules_regex: Optional[str] = None):
     '''
