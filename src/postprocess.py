@@ -1015,7 +1015,7 @@ def split_dict(d: dict, filter_fn:callable):
             d2[k] = v
     return d1, d2
 
-def get_avg_ranks(setup_score_values: dict[str, list[float]], *, ascending = True):
+def get_avg_ranks(setup_score_values: dict[str, list[float]], *, ascending = True) -> dict[str, float]:
     ''' ranks setups, assumes that same trials are given as list, index of trial defines same trial accross setups  '''
     setup_names = list(setup_score_values.keys())
     total_measures = np.array([setup_score_values[setup_name] for setup_name in setup_names])
@@ -1295,7 +1295,8 @@ def output_table(df: pd.DataFrame, base_path: str, task: str, postprocess_dir = 
         print(tabulate(df, headers = 'keys', tablefmt="github", floatfmt=".3f", showindex=True), file = stats_file)
     pass 
 
-def draw_ft2_metric2(task: str, infile: str, outfile: str, metric = 'accuracy', influence_method = "", module_pattern_to_name = {}, allowed_filter_methods = ['rand', 'denoise', 'none']):
+def draw_ft2_metric2(task: str, infile: str, outfile: str, metric = 'accuracy', infl_methods = [], module_pattern_to_name = {},
+                        colors = {}, legend_order = {}, legend_names = {}, infl_vs_module_filter = []):
     with open(infile, 'r') as f:
         json_lines = f.readlines()
     all_metrics = [json.loads(l) for l in json_lines]
@@ -1304,25 +1305,32 @@ def draw_ft2_metric2(task: str, infile: str, outfile: str, metric = 'accuracy', 
         metric_values = metrics[metric]
         infl_method = metrics['config']['infl_method']
         filter_method = metrics['config']['filter_method']                
-        if (influence_method != "" and influence_method != infl_method) and (filter_method not in allowed_filter_methods):
-            continue
         module_pattern = metrics['config']['module_pattern']
-        if module_pattern == '':
-            module_pattern = filter_method
-        if module_pattern not in module_pattern_to_name:
+        # if module_pattern == '':
+        #     module_pattern = filter_method
+        module_name = module_pattern_to_name.get(module_pattern, module_pattern)
+        selected = (((infl_method in infl_methods) or (filter_method in infl_methods)) and \
+                           module_pattern in module_pattern_to_name) or \
+                          (infl_method, module_name) in infl_vs_module_filter or \
+                          (filter_method, module_name) in infl_vs_module_filter
+        if not selected:
             continue
-        module_pattern = module_pattern_to_name[module_pattern]
         is_infl = False
         if filter_method  == 'infl':
             filter_method = infl_method
             is_infl = True
         if module_pattern != "" and is_infl:
-            filter_method = f'{filter_method}, {module_pattern}'
+            filter_method = f'{filter_method}, {module_name}'
         method_metrics[filter_method].append(metric_values)
+    
+    method_metrics_flat = {k: [v3 for v2 in v for v3 in v2] for k, v in method_metrics.items()}
+    method_metric_ranks = get_avg_ranks(method_metrics_flat)
 
-    method_names = sorted(method_metrics.keys())
+    method_names = sorted(method_metrics.keys(), key = method_metric_ranks.get)
     plt.ioff()
-    for method in method_names:
+    handles_dict = {}
+    labels_dict = {}
+    for i, method in enumerate(method_names):
         metrics = method_metrics[method]
         metric_values = np.array(metrics) * 100
         mean = np.mean(metric_values, axis=0)
@@ -1332,21 +1340,28 @@ def draw_ft2_metric2(task: str, infile: str, outfile: str, metric = 'accuracy', 
         confidence_interval = stats.t.interval(confidence_level, degrees_freedom, mean, sample_standard_error)
         min_v = confidence_interval[0]
         max_v = confidence_interval[1]
-        default_args = dict(marker='o', markersize=5, linewidth=1)
+        default_args = dict(marker='o', markersize=4, linewidth=1, color = colors[method])
         if method == 'denoise':
             default_args = dict(linewidth=1, color='darkgray', linestyle='--')
         if method == 'rand':
             default_args = dict(linewidth=1, color='gray', linestyle='-.')
-        xs = np.arange(len(mean)) + 1
-        line = plt.plot(xs, mean, label=method, **default_args)
-        plt.fill_between(xs, min_v, max_v, alpha=.05, color = line[0].get_color(), linewidth=0)
+        # xs = np.arange(len(mean)) + 1
+        xs = np.arange(len(mean)) + 1 + ((i - len(method_metrics) // 2) * 0.075)  # Shift x-coordinates slightly
+        line = plt.plot(xs, mean, linestyle='none', zorder=1, **default_args)
+        # plt.fill_between(xs, min_v, max_v, alpha=.05, color = line[0].get_color(), linewidth=0)
+        plt.errorbar(xs, mean, yerr=[mean - min_v, max_v - mean], alpha=.5, fmt='none', ecolor=line[0].get_color(), capsize=2, linewidth=1, zorder=0)
+        handles_dict[method] = line[0]
+        labels_dict[method] = legend_names.get(method, method)
     
+    ordered_legend_names = sorted(handles_dict.keys(), key = legend_order.get)
+    ordered_handles = [handles_dict[k] for k in ordered_legend_names]
+    ordered_labels = [labels_dict[k] for k in ordered_legend_names]
     plt.xlabel('Epoch')
     plt.ylabel('Accuracy, \\%')
     # plt.xticks(fontsize=12)
     # plt.yticks(fontsize=12)
-    plt.legend(fontsize='small')
-    plt.title(f'{task.upper()} 70% filtered finetuning', fontsize=15)
+    plt.legend(ordered_handles, ordered_labels, fontsize='small')
+    plt.title(f'{task.upper()} 70\\% filtered finetuning', fontsize=15)
     plt.tight_layout()
     plt.savefig(outfile)  
     plt.clf()  
@@ -1378,6 +1393,52 @@ if __name__ == "__main__":
     base_path = './data/roberta-infl-matrix-with-we'
     tasks = ['qnli', 'mrpc', 'sst2', 'qqp']
 
+    # module_groups_regex = { "WE": ".*\\.word_embeddings\\..*",
+                            
+    #                         "00-05": ".*\\.layer\\.([0-5])\\..*\\.lora_(A|B)\\..*",
+    #                         "06-11": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_(A|B)\\..*",
+    #                         "12-17": ".*\\.layer\\.(1[2-7])\\..*\\.lora_(A|B)\\..*",
+    #                         "18-23": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_(A|B)\\..*",
+
+    #                         "00-05 A": ".*\\.layer\\.([0-5])\\..*\\.lora_A\\..*",
+    #                         "06-11 A": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_A\\..*",
+    #                         "12-17 A": ".*\\.layer\\.(1[2-7])\\..*\\.lora_A\\..*",
+    #                         "18-23 A": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_A\\..*",
+
+    #                         "00-05 B": ".*\\.layer\\.([0-5])\\..*\\.lora_B\\..*",
+    #                         "06-11 B": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_B\\..*",
+    #                         "12-17 B": ".*\\.layer\\.(1[2-7])\\..*\\.lora_B\\..*",
+    #                         "18-23 B": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_B\\..*",                            
+
+    #                         "CL": ".*\\.classifier\\..*",
+    #                      }
+
+    # infl_methods = [
+    #     'hf',
+    #     'cos',
+    #     'datainf',
+    #     'hf_we_', 
+    #     'hf_we_topk_10',
+    # ]
+    # agg_methods = {
+    #     "rank": rank_matrix_score, 
+    #     "mean": mean_matrix_score, 
+    #     "mean_10": partial(mean_matrix_score, trim_ratio=0.1),
+    #     "mean_50": partial(mean_matrix_score, trim_ratio=0.5),
+    #     "dir": dir_matrix_score,
+    # }
+    # for task in tasks:
+    #     df = compute_ndr_metrics_table(base_path, task=task,
+    #                                     module_groups_regex = module_groups_regex,
+    #                                     agg_methods=agg_methods,
+    #                                     infl_methods = infl_methods)
+    #     print(df)
+    #     pass 
+    #     output_table(df, base_path, task)
+    #     pass
+
+
+    infl_methods = ["hf", "hf_we_", "hf_we_topk_10"]
     module_groups_regex = { "WE": ".*\\.word_embeddings\\..*",
                             
                             "00-05": ".*\\.layer\\.([0-5])\\..*\\.lora_(A|B)\\..*",
@@ -1385,42 +1446,333 @@ if __name__ == "__main__":
                             "12-17": ".*\\.layer\\.(1[2-7])\\..*\\.lora_(A|B)\\..*",
                             "18-23": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_(A|B)\\..*",
 
-                            "00-05 A": ".*\\.layer\\.([0-5])\\..*\\.lora_A\\..*",
-                            "06-11 A": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_A\\..*",
-                            "12-17 A": ".*\\.layer\\.(1[2-7])\\..*\\.lora_A\\..*",
-                            "18-23 A": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_A\\..*",
+                            # "00-05 A": ".*\\.layer\\.([0-5])\\..*\\.lora_A\\..*",
+                            # "06-11 A": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_A\\..*",
+                            # "12-17 A": ".*\\.layer\\.(1[2-7])\\..*\\.lora_A\\..*",
+                            # "18-23 A": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_A\\..*",
 
-                            "00-05 B": ".*\\.layer\\.([0-5])\\..*\\.lora_B\\..*",
-                            "06-11 B": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_B\\..*",
-                            "12-17 B": ".*\\.layer\\.(1[2-7])\\..*\\.lora_B\\..*",
-                            "18-23 B": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_B\\..*",                            
+                            # "00-05 B": ".*\\.layer\\.([0-5])\\..*\\.lora_B\\..*",
+                            # "06-11 B": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_B\\..*",
+                            # "12-17 B": ".*\\.layer\\.(1[2-7])\\..*\\.lora_B\\..*",
+                            # "18-23 B": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_B\\..*",                            
 
                             "CL": ".*\\.classifier\\..*",
                          }
-
-    infl_methods = [
-        'hf',
-        'cos',
-        'datainf',
-        'hf_we_', 
-        'hf_we_topk_10',
-    ]
-    agg_methods = {
-        "rank": rank_matrix_score, 
-        "mean": mean_matrix_score, 
-        "mean_10": partial(mean_matrix_score, trim_ratio=0.1),
-        "mean_50": partial(mean_matrix_score, trim_ratio=0.5),
-        "dir": dir_matrix_score,
+    
+    colors = {
+        "hf_we_, WE": '#1f77b4',
+        "hf, WE": "#ff7f0e",
+        "hf, 00-05": "#2ca02c",
+        "hf, 18-23": "#d62728",
+        "hf, CL": "#9467bd",
+        "hf, 06-11": "#8c564b",
+        "hf, 12-17": "#e377c2",
+        "hf_we_topk_10, WE": '#7f7f7f'
+        # '#bcbd22', '#17becf'
     }
-    for task in tasks:
-        df = compute_ndr_metrics_table(base_path, task=task,
-                                        module_groups_regex = module_groups_regex,
-                                        agg_methods=agg_methods,
-                                        infl_methods = infl_methods)
-        print(df)
-        pass 
-        output_table(df, base_path, task)
-        pass
+
+    legend_order = {
+        "hf_we_, WE": 0,
+        "hf_we_topk_10, WE": 1,
+        "hf, WE": 2,
+        "hf, 00-05": 3,
+        "hf, 06-11": 4,
+        "hf, 12-17": 5,
+        "hf, 18-23": 6,
+        "hf, CL": 7,
+    }
+    legend_names = {
+        "hf_we_, WE": "hf$_{we}$",
+        "hf_we_topk_10, WE": "hf$_{we}^{10}$"
+    }
+    module_groups_regex_rev = {v:k for k,v in module_groups_regex.items()}
+    tasks = ['mrpc', 'qnli', 'sst2', 'qqp']
+    for d in tasks:
+        draw_ft2_metric2(d, infile = f'./data/roberta-infl-matrix-with-we/{d}/metrics.jsonlist', outfile = f'./data/roberta-infl-matrix-with-we/{d}/postprocess/T-acc-hf-layers.pdf',
+                        infl_methods = infl_methods, metric = 'accuracy', module_pattern_to_name = module_groups_regex_rev,
+                        colors=colors, legend_order = legend_order, legend_names = legend_names)
+
+    pass
+
+    # infl_methods = ["hf", "hf_we_", "hf_we_topk_10"]
+    # module_groups_regex = { "WE": ".*\\.word_embeddings\\..*",
+                            
+    #                         # "00-05": ".*\\.layer\\.([0-5])\\..*\\.lora_(A|B)\\..*",
+    #                         # "06-11": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_(A|B)\\..*",
+    #                         # "12-17": ".*\\.layer\\.(1[2-7])\\..*\\.lora_(A|B)\\..*",
+    #                         # "18-23": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_(A|B)\\..*",
+
+    #                         # "00-05 A": ".*\\.layer\\.([0-5])\\..*\\.lora_A\\..*",
+    #                         # "06-11 A": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_A\\..*",
+    #                         "12-17 A": ".*\\.layer\\.(1[2-7])\\..*\\.lora_A\\..*",
+    #                         "18-23 A": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_A\\..*",
+
+    #                         # "00-05 B": ".*\\.layer\\.([0-5])\\..*\\.lora_B\\..*",
+    #                         # "06-11 B": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_B\\..*",
+    #                         "12-17 B": ".*\\.layer\\.(1[2-7])\\..*\\.lora_B\\..*",
+    #                         "18-23 B": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_B\\..*",                            
+
+    #                         "CL": ".*\\.classifier\\..*",
+    #                      }
+    
+    # colors = {
+    #     "hf_we_, WE": '#1f77b4',
+    #     "hf_we_topk_10, WE": '#7f7f7f',
+    #     "hf, WE": "#ff7f0e",
+    #     "hf, 12-17 A": "#2ca02c",
+    #     "hf, 12-17 B": "#d62728",
+    #     "hf, 18-23 A": "#8c564b",
+    #     "hf, 18-23 B": "#e377c2",
+    #     "hf, CL": "#9467bd",
+    #     # '#bcbd22', '#17becf'
+    # }
+
+    # legend_order = {
+    #     "hf_we_, WE": 0,
+    #     "hf_we_topk_10, WE": 1,
+    #     "hf, WE": 2,
+    #     "hf, 12-17 A": 3,
+    #     "hf, 12-17 B": 4,
+    #     "hf, 18-23 A": 5,
+    #     "hf, 18-23 B": 6,
+    #     "hf, CL": 7,
+    # }
+    # legend_names = {
+    #     "hf_we_, WE": "hf$_{we}$",
+    #     "hf_we_topk_10, WE": "hf$_{we}^{10}$"
+    # }
+    # module_groups_regex_rev = {v:k for k,v in module_groups_regex.items()}
+    # for d in tasks:
+    #     draw_ft2_metric2(d, infile = f'./data/roberta-infl-matrix-with-we/{d}/metrics.jsonlist', outfile = f'./data/roberta-infl-matrix-with-we/{d}/postprocess/T-acc-hf-AB.pdf',
+    #                     infl_methods = infl_methods, metric = 'accuracy', module_pattern_to_name = module_groups_regex_rev,
+    #                     colors=colors, legend_order = legend_order, legend_names = legend_names)
+
+
+    # infl_vs_module_filter = [("datainf", "12-17 A"), ("hf", "12-17"), ("cos", "18-23 B"), ("hf_we_", "WE"), ("hf_we_topk_10", "WE")]
+    # module_groups_regex = { "WE": ".*\\.word_embeddings\\..*",
+                            
+    #                         "00-05": ".*\\.layer\\.([0-5])\\..*\\.lora_(A|B)\\..*",
+    #                         "06-11": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_(A|B)\\..*",
+    #                         "12-17": ".*\\.layer\\.(1[2-7])\\..*\\.lora_(A|B)\\..*",
+    #                         "18-23": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_(A|B)\\..*",
+
+    #                         "00-05 A": ".*\\.layer\\.([0-5])\\..*\\.lora_A\\..*",
+    #                         "06-11 A": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_A\\..*",
+    #                         "12-17 A": ".*\\.layer\\.(1[2-7])\\..*\\.lora_A\\..*",
+    #                         "18-23 A": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_A\\..*",
+
+    #                         "00-05 B": ".*\\.layer\\.([0-5])\\..*\\.lora_B\\..*",
+    #                         "06-11 B": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_B\\..*",
+    #                         "12-17 B": ".*\\.layer\\.(1[2-7])\\..*\\.lora_B\\..*",
+    #                         "18-23 B": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_B\\..*",                            
+
+    #                         "CL": ".*\\.classifier\\..*",
+    #                      }
+    
+    # colors = {
+    #     "hf_we_, WE": '#1f77b4',
+    #     "hf_we_topk_10, WE": '#7f7f7f',
+    #     # "hf, WE": "#ff7f0e",
+    #     "hf, 12-17": "#2ca02c",
+    #     "cos, 18-23 B": "#ff7f0e",
+    #     # "hf, 12-17 B": "#d62728",
+    #     # "hf, 18-23 A": "#8c564b",
+    #     # "hf, 18-23 B": "#e377c2",
+    #     # "hf, CL": "#9467bd",
+    #     "datainf, 12-17 A":"#9467bd",
+    #     # '#bcbd22', '#17becf'
+    # }
+
+    # legend_order = {
+    #     "hf_we_, WE": 0,
+    #     "hf_we_topk_10, WE": 1,
+    #     "datainf, 12-17 A": 2,
+    #     "hf, 12-17": 3,
+    #     "cos, 18-23 B": 4,
+    # }
+    # legend_names = {
+    #     "hf_we_, WE": "hf$_{we}$",
+    #     "hf_we_topk_10, WE": "hf$_{we}^{10}$"
+    # }
+    # tasks = ['mrpc']
+    # module_groups_regex_rev = {v:k for k,v in module_groups_regex.items()}
+    # for d in tasks:
+    #     draw_ft2_metric2(d, infile = f'./data/roberta-infl-matrix-with-we/{d}/metrics.jsonlist', outfile = f'./data/roberta-infl-matrix-with-we/{d}/postprocess/T-acc-hf-top.pdf',
+    #                     metric = 'accuracy', module_pattern_to_name = module_groups_regex_rev,
+    #                     colors=colors, legend_order = legend_order, legend_names = legend_names,
+    #                     infl_vs_module_filter = infl_vs_module_filter)
+        
+    # pass
+
+    # infl_vs_module_filter = [("cos", ""), ("datainf", "18-23 B"), ("hf", "18-23 B"), ("hf_we_", "WE"), ("hf_we_topk_10", "WE")]
+    # module_groups_regex = { "WE": ".*\\.word_embeddings\\..*",
+                            
+    #                         "00-05": ".*\\.layer\\.([0-5])\\..*\\.lora_(A|B)\\..*",
+    #                         "06-11": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_(A|B)\\..*",
+    #                         "12-17": ".*\\.layer\\.(1[2-7])\\..*\\.lora_(A|B)\\..*",
+    #                         "18-23": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_(A|B)\\..*",
+
+    #                         "00-05 A": ".*\\.layer\\.([0-5])\\..*\\.lora_A\\..*",
+    #                         "06-11 A": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_A\\..*",
+    #                         "12-17 A": ".*\\.layer\\.(1[2-7])\\..*\\.lora_A\\..*",
+    #                         "18-23 A": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_A\\..*",
+
+    #                         "00-05 B": ".*\\.layer\\.([0-5])\\..*\\.lora_B\\..*",
+    #                         "06-11 B": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_B\\..*",
+    #                         "12-17 B": ".*\\.layer\\.(1[2-7])\\..*\\.lora_B\\..*",
+    #                         "18-23 B": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_B\\..*",                            
+
+    #                         "CL": ".*\\.classifier\\..*",
+    #                      }
+    
+    # colors = {
+    #     "hf_we_, WE": '#1f77b4',
+    #     "hf_we_topk_10, WE": '#7f7f7f',
+    #     "hf, 18-23 B": "#2ca02c",
+    #     "datainf, 18-23 B":"#9467bd",
+    #     "cos": "#ff7f0e",
+    #     # "hf, 12-17 B": "#d62728",
+    #     # "hf, 18-23 A": "#8c564b",
+    #     # "hf, 18-23 B": "#e377c2",
+    #     # "hf, CL": "#9467bd",
+    #     # '#bcbd22', '#17becf'
+    # }
+
+    # legend_order = {
+    #     "hf_we_, WE": 0,
+    #     "hf_we_topk_10, WE": 1,
+    #     "hf, 18-23 B": 2,
+    #     "datainf, 18-23 B": 3,
+    #     "cos": 4,
+    # }
+    # legend_names = {
+    #     "hf_we_, WE": "hf$_{we}$",
+    #     "hf_we_topk_10, WE": "hf$_{we}^{10}$"
+    # }
+    # tasks = ['qnli']
+    # module_groups_regex_rev = {v:k for k,v in module_groups_regex.items()}
+    # for d in tasks:
+    #     draw_ft2_metric2(d, infile = f'./data/roberta-infl-matrix-with-we/{d}/metrics.jsonlist', outfile = f'./data/roberta-infl-matrix-with-we/{d}/postprocess/T-acc-hf-top.pdf',
+    #                     metric = 'accuracy', module_pattern_to_name = module_groups_regex_rev,
+    #                     colors=colors, legend_order = legend_order, legend_names = legend_names,
+    #                     infl_vs_module_filter = infl_vs_module_filter)
+        
+    # pass    
+
+    # infl_vs_module_filter = [("datainf", "18-23 A"), ("cos", "18-23 B"), ("hf", "CL"), ("hf_we_", "WE"), ("hf_we_topk_10", "WE")]
+    # module_groups_regex = { "WE": ".*\\.word_embeddings\\..*",
+                            
+    #                         "00-05": ".*\\.layer\\.([0-5])\\..*\\.lora_(A|B)\\..*",
+    #                         "06-11": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_(A|B)\\..*",
+    #                         "12-17": ".*\\.layer\\.(1[2-7])\\..*\\.lora_(A|B)\\..*",
+    #                         "18-23": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_(A|B)\\..*",
+
+    #                         "00-05 A": ".*\\.layer\\.([0-5])\\..*\\.lora_A\\..*",
+    #                         "06-11 A": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_A\\..*",
+    #                         "12-17 A": ".*\\.layer\\.(1[2-7])\\..*\\.lora_A\\..*",
+    #                         "18-23 A": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_A\\..*",
+
+    #                         "00-05 B": ".*\\.layer\\.([0-5])\\..*\\.lora_B\\..*",
+    #                         "06-11 B": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_B\\..*",
+    #                         "12-17 B": ".*\\.layer\\.(1[2-7])\\..*\\.lora_B\\..*",
+    #                         "18-23 B": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_B\\..*",                            
+
+    #                         "CL": ".*\\.classifier\\..*",
+    #                      }
+    
+    # colors = {
+    #     "hf_we_, WE": '#1f77b4',
+    #     "hf_we_topk_10, WE": '#7f7f7f',
+    #     # "hf, WE": "#ff7f0e",
+    #     "hf, CL": "#2ca02c",
+    #     "cos, 18-23 B": "#ff7f0e",
+    #     # "hf, 12-17 B": "#d62728",
+    #     # "hf, 18-23 A": "#8c564b",
+    #     # "hf, 18-23 B": "#e377c2",
+    #     # "hf, CL": "#9467bd",
+    #     "datainf, 18-23 A":"#9467bd",
+    #     # '#bcbd22', '#17becf'
+    # }
+
+    # legend_order = {
+    #     "hf_we_, WE": 0,
+    #     "hf_we_topk_10, WE": 1,
+    #     "datainf, 18-23 A": 2,
+    #     "cos, 18-23 B": 3,
+    #     "hf, CL": 4,
+    # }
+    # legend_names = {
+    #     "hf_we_, WE": "hf$_{we}$",
+    #     "hf_we_topk_10, WE": "hf$_{we}^{10}$"
+    # }
+    # tasks = ['qqp']
+    # module_groups_regex_rev = {v:k for k,v in module_groups_regex.items()}
+    # for d in tasks:
+    #     draw_ft2_metric2(d, infile = f'./data/roberta-infl-matrix-with-we/{d}/metrics.jsonlist', outfile = f'./data/roberta-infl-matrix-with-we/{d}/postprocess/T-acc-hf-top.pdf',
+    #                     metric = 'accuracy', module_pattern_to_name = module_groups_regex_rev,
+    #                     colors=colors, legend_order = legend_order, legend_names = legend_names,
+    #                     infl_vs_module_filter = infl_vs_module_filter)
+        
+    # pass    
+
+    # infl_vs_module_filter = [("cos", "18-23 B"), ("datainf", "18-23 B"), ("hf", "18-23 B"), ("hf_we_", "WE"), ("hf_we_topk_10", "WE")]
+    # module_groups_regex = { "WE": ".*\\.word_embeddings\\..*",
+                            
+    #                         "00-05": ".*\\.layer\\.([0-5])\\..*\\.lora_(A|B)\\..*",
+    #                         "06-11": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_(A|B)\\..*",
+    #                         "12-17": ".*\\.layer\\.(1[2-7])\\..*\\.lora_(A|B)\\..*",
+    #                         "18-23": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_(A|B)\\..*",
+
+    #                         "00-05 A": ".*\\.layer\\.([0-5])\\..*\\.lora_A\\..*",
+    #                         "06-11 A": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_A\\..*",
+    #                         "12-17 A": ".*\\.layer\\.(1[2-7])\\..*\\.lora_A\\..*",
+    #                         "18-23 A": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_A\\..*",
+
+    #                         "00-05 B": ".*\\.layer\\.([0-5])\\..*\\.lora_B\\..*",
+    #                         "06-11 B": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_B\\..*",
+    #                         "12-17 B": ".*\\.layer\\.(1[2-7])\\..*\\.lora_B\\..*",
+    #                         "18-23 B": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_B\\..*",                            
+
+    #                         "CL": ".*\\.classifier\\..*",
+    #                      }
+    
+    # colors = {
+    #     "hf_we_, WE": '#1f77b4',
+    #     "hf_we_topk_10, WE": '#7f7f7f',
+    #     # "hf, WE": "#ff7f0e",
+    #     "hf, 18-23 B": "#2ca02c",
+    #     "cos, 18-23 B": "#ff7f0e",
+    #     # "hf, 12-17 B": "#d62728",
+    #     # "hf, 18-23 A": "#8c564b",
+    #     # "hf, 18-23 B": "#e377c2",
+    #     # "hf, CL": "#9467bd",
+    #     "datainf, 18-23 B":"#9467bd",
+    #     # '#bcbd22', '#17becf'
+    # }
+
+    # legend_order = {
+    #     "hf_we_, WE": 0,
+    #     "hf_we_topk_10, WE": 1,
+    #     "hf, 18-23 B": 3,
+    #     "datainf, 18-23 B": 4,
+    #     "cos, 18-23 B": 5,
+    # }
+    # legend_names = {
+    #     "hf_we_, WE": "hf$_{we}$",
+    #     "hf_we_topk_10, WE": "hf$_{we}^{10}$"
+    # }
+    # tasks = ['sst2']
+    # module_groups_regex_rev = {v:k for k,v in module_groups_regex.items()}
+    # for d in tasks:
+    #     draw_ft2_metric2(d, infile = f'./data/roberta-infl-matrix-with-we/{d}/metrics.jsonlist', outfile = f'./data/roberta-infl-matrix-with-we/{d}/postprocess/T-acc-hf-top.pdf',
+    #                     metric = 'accuracy', module_pattern_to_name = module_groups_regex_rev,
+    #                     colors=colors, legend_order = legend_order, legend_names = legend_names,
+    #                     infl_vs_module_filter = infl_vs_module_filter)
+        
+    # pass        
+
+    #------------------------------------------------------------------------
+    # OLD code from here
 
     # compute_noise_detection_metrics('./data/roberta-infl-matrix-with-we/qnli', 
     #                                 plot_title = "QNLI on Roberta-large with WE",

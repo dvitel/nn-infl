@@ -901,14 +901,14 @@ def finetune2(task = 'mrpc',
         filter_fn = None
 
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
-    train_dataloader, eval_dataloader, _, _ = \
+    train_dataloader, eval_dataloader, infl_dataloader, _ = \
         build_loaders(dataset_path, config['tokenizer_name'], batch_size, filter_fn=filter_fn)
 
     lora_model = build_LORA_model(model_name_or_path=model,
                                 target_modules=target_modules, 
                                 low_rank=config['low_rank'],
                                 unfreeze_modules_regex=unfreeze_regex)
-    eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, None, device, num_epochs, lr,
+    eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, infl_dataloader, device, num_epochs, lr,
                                     compute_gold_val_predictions=True)
 
     del lora_model, train_dataloader, eval_dataloader

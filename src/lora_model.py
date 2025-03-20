@@ -141,7 +141,7 @@ def train_LORA_model(model: torch.nn.Module,
     '''
     # metric = evaluate.load("glue", task)
     accuracy_metric = evaluate.load("accuracy")
-    # infl_accuracy_metric = evaluate.load("accuracy")
+    infl_accuracy_metric = evaluate.load("accuracy")
     f1_metric = evaluate.load("f1")
     optimizer = AdamW(params=model.parameters(), lr=lr)
 
@@ -191,10 +191,12 @@ def train_LORA_model(model: torch.nn.Module,
                             grads_norms[name] = torch.norm(param.grad.view(-1))
             optimizer.zero_grad()
 
+        train_loss = []
         for step, batch in enumerate(tqdm(train_dataloader)):
             batch.to(device)
             outputs = model(**batch)
             loss = outputs.loss
+            train_loss.append(loss.item())
             loss.backward()
             optimizer.step()            
             lr_scheduler.step()
@@ -239,12 +241,12 @@ def train_LORA_model(model: torch.nn.Module,
                 batch_size = outputs.logits.shape[0]
                 infl_logits[infl_shift:infl_shift+batch_size] = outputs.logits
                 infl_shift += batch_size
-                # predictions = outputs.logits.argmax(dim=-1)
-                # predictions, references = predictions, batch["labels"]
-                # infl_accuracy_metric.add_batch(
-                #     predictions=predictions,
-                #     references=references,
-                # )
+                predictions = outputs.logits.argmax(dim=-1)
+                predictions, references = predictions, batch["labels"]
+                infl_accuracy_metric.add_batch(
+                    predictions=predictions,
+                    references=references,
+                )
 
         for step, batch in enumerate(tqdm(eval_dataloader)):
             batch.to(device)
@@ -268,7 +270,7 @@ def train_LORA_model(model: torch.nn.Module,
         # eval_metric = metric.compute()
         accuracy = accuracy_metric.compute()
         f1 = f1_metric.compute()
-        metrics = {**accuracy, **f1}
+        metrics = {**accuracy, **f1, "train_loss": np.mean(train_loss)}
         if len(infl_loss) > 0:
             infl_loss_value = np.mean(infl_loss)            
         else: 
@@ -280,7 +282,8 @@ def train_LORA_model(model: torch.nn.Module,
                 infl_logits_path = f"{best_checkpoint_path}/infl_logits.pt"
                 torch.save(infl_logits, infl_logits_path)
         if infl_loss_value is not None:
-            metrics.update(best_infl_loss = best_infl_loss, infl_loss = infl_loss_value)
+            infl_accuracy = infl_accuracy_metric.compute()["accuracy"]
+            metrics.update(best_infl_loss = best_infl_loss, infl_loss = infl_loss_value, infl_accuracy = infl_accuracy)
         print(f"Epoch {(epoch+1)}:", metrics)
         for key, item in metrics.items():
             eval_metrics.setdefault(key, []).append(item)
