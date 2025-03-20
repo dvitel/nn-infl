@@ -663,6 +663,9 @@ matrix_infl_methods = {
     # "lissa_we": partial(common_we, base_method_fn=matrix_lissa_fn),
 }
 
+def is_embedding_module(module_name: str):
+    return ('.word_embeddings.' in module_name) or ('.embed_tokens.' in module_name)
+
 # Mem koef NOTE: hf (1.1, 0.3), hf_we_ (2, 0.3), hf_we_topk (2, 0.3), cos (1.1, 0.3), cov (2, 0.3), datainf_one (1.1, 0.3), datainf (2, 0.3), 
 def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datainf_one,datainf", mem_koef: float = 2.0, mem_delta: float = 0.3,
                 ignore_metrics = False, i_prefix='i', m_prefix='m_b'):
@@ -748,7 +751,7 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
                                             for module_name, _, module_params in active_modules
                                             if ((method_name in methods_without_we) and (module_params.numel() < 100000)) or
                                                 ((method_name not in methods_without_we) and ('_we_' not in method_name)) or 
-                                                ((method_name not in methods_without_we) and ('_we_' in method_name) and ('.word_embeddings.' in module_name))} 
+                                                ((method_name not in methods_without_we) and ('_we_' in method_name) and is_embedding_module(module_name))} 
                                 for method_name in method_names}
     
     interaction_modules = set([module_name for int_matrices in interaction_matrices.values() for module_name in int_matrices.keys()])
