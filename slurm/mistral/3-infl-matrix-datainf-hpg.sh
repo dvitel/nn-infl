@@ -1,7 +1,7 @@
 #!/bin/bash -l
 #SBATCH --job-name=m-i-d
 #SBATCH --time=72:00:00
-#SBATCH --output m-i-d-%j.out
+#SBATCH --output m-i-d-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/mistral
 #SBATCH -p hpg-ai
 #SBATCH --open-mode=append
