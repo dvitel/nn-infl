@@ -6,6 +6,7 @@ import json
 import os
 import re
 from time import time
+from typing import Optional
 
 from tqdm import tqdm
 os.environ['HF_HOME'] = os.path.join(os.getcwd(), '.cache')
@@ -171,6 +172,15 @@ def build_loaders(dataset_path, tokenizer_name, batch_size = 32, shuffle_train =
                                  collate_fn=collator, 
                                  batch_size=batch_size)    
     return train_dataloader, eval_dataloader, infl_dataloader, tokenizer
+
+def info(model: str = 'roberta-large', unfreeze_regex = None, low_rank = 4, lora_targets: str = 'value', out_file: Optional[str] = None):
+    ''' Loads and Prints information about the model '''
+    lora_targets = lora_targets.split(',')
+    lora_model = build_LORA_model(model_name_or_path=model,
+                                target_modules=lora_targets, 
+                                low_rank=low_rank, unfreeze_modules_regex=unfreeze_regex,
+                                model_info_file=(None if out_file is None else os.path.join(cwd, out_file)))
+    del lora_model
     
 def finetune(task = 'mrpc', low_rank = 4,
          device = 'cuda', lr = 3e-4, model = 'roberta-large', batch_size = 32,
@@ -935,7 +945,7 @@ def finetune2(task = 'mrpc',
         torch.cuda.empty_cache()
 
 parser = argh.ArghParser()
-parser.add_commands([preprocess, finetune, grads, infl, infl_matrix, finetune2])
+parser.add_commands([info, preprocess, finetune, grads, infl, infl_matrix, finetune2])
 
 def test_infl_vs_infl_matrix(file1: str, file2: str):
     infl = torch.load(file1)

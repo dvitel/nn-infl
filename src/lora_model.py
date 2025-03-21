@@ -1,7 +1,11 @@
+import json
 import os
 import re
+import sys
 from typing import Optional
 import numpy as np
+import pandas as pd
+from tabulate import tabulate
 from tqdm import tqdm
 import pickle
 import torch
@@ -56,22 +60,21 @@ def unfreeze_modules(model: torch.nn.Module, unfreeze_modules_regex: Optional[st
                 submodule = model.get_submodule(module_true_name)
                 submodule.register_forward_hook(dropout_forward_hook)
         
-def build_LORA_model(model_name_or_path, target_modules, low_rank, unfreeze_modules_regex: Optional[str] = None):
+def build_LORA_model(model_name_or_path, target_modules, low_rank, unfreeze_modules_regex: Optional[str] = None,
+                        model_info_file: Optional[str] = None):
     '''
     unfreeze_modules - list of additional modules to unfreeze
     '''
 
     model_config = {}
 
-    if "llama" in model_name_or_path:
+    # ["q_proj", "v_proj"]
 
-        # ["q_proj", "v_proj"]
-
-        model_config["torch_dtype"] = torch.bfloat16 
-        # NOTE: should we include qunatization?
-        # model_config["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True, load_in_4bit=False)
-        model_config["offload_folder"] = os.path.join(os.environ['HF_HOME'], ".offload") 
-        model_config["offload_state_dict"] = True
+    model_config["torch_dtype"] = torch.bfloat16 
+    # NOTE: should we include qunatization?
+    # model_config["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True, load_in_4bit=False)
+    model_config["offload_folder"] = os.path.join(os.environ['HF_HOME'], ".offload") 
+    model_config["offload_state_dict"] = True
         
     #     # load a base model
     #     base_model = LlamaForCausalLM.from_pretrained(
@@ -104,7 +107,24 @@ def build_LORA_model(model_name_or_path, target_modules, low_rank, unfreeze_modu
     unfreeze_modules(model, unfreeze_modules_regex)
 
     model.print_trainable_parameters()
-
+    
+    infos = []
+    for module_name, p in model.named_parameters():
+        size_gb = p.numel() * (torch.finfo(p.dtype).bits // 8) / 1024 ** 3
+        shape = [d for d in p.shape]
+        tunable = p.requires_grad
+        infos.append({"name": module_name, "numel": p.numel(), "size_gb": size_gb, "shape": shape, 'tunable': tunable})
+    num_tunable_p, num_all_p = model.get_nb_trainable_parameters()
+    try:
+        if model_info_file is not None:
+            f = open(model_info_file, "w")
+        else:
+            f = sys.stdout
+        print("Num trainable parameters: %d, num all parameters: %d, %.2f" % (num_tunable_p, num_all_p, round(num_tunable_p * 100 / num_all_p)), file=f)
+        print(tabulate(infos, headers="keys", tablefmt="github", floatfmt=".3f", showindex=True), file=f)
+    finally:
+        if model_info_file is not None:
+            f.close()
     return model
 
 def load_pretrained_LORA_model(model_name_or_path, unfreeze_modules_regex: Optional[str] = None):
