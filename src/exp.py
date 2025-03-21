@@ -386,7 +386,7 @@ class DatasetSplits:
 # numel_levels = [*[ 100*(i + 1) for i in range(10)], *[ 1000*(i + 1) for i in range(10)], *[ 10000*(i + 1) for i in range(10)]]        
 # numel_levels_with_ids = list(enumerate(numel_levels))
 
-def pick_modules_and_split_size(active_modules_sorted: list[tuple[str, int]], train_num_samples: int, val_num_samples: int, 
+def pick_modules_and_split_size(active_modules_sorted: list[tuple[str, int, torch.nn.Parameter]], train_num_samples: int, val_num_samples: int, 
                             method_memory_koef: float = 1.0,
                             memory_delta: float = 0.5,
                             device = "cuda"):
@@ -406,12 +406,15 @@ def pick_modules_and_split_size(active_modules_sorted: list[tuple[str, int]], tr
     total_num_samples = train_num_samples + val_num_samples
 
     selected_byte_size = 0 
+    selected_numel = 0
     selected_index = 0
     estimated_num_samples = total_num_samples
 
     while selected_index < len(active_modules_sorted):
         cur_mod_byte_size = active_modules_sorted[selected_index][1]
+        cur_numel = active_modules_sorted[selected_index][2].numel()
         selected_byte_size += cur_mod_byte_size
+        selected_numel += cur_numel
         estimated_num_samples = round(total_memory_bytes / (selected_byte_size * method_memory_koef))
         selected_index += 1
         if estimated_num_samples <= total_num_samples:
@@ -421,12 +424,14 @@ def pick_modules_and_split_size(active_modules_sorted: list[tuple[str, int]], tr
                 else:
                     estimated_num_samples = round(total_memory_bytes / (selected_byte_size * method_memory_koef))
                 selected_byte_size -= cur_mod_byte_size
+                selected_numel -= cur_numel
                 selected_index -= 1        
             break
         
     # too_big_WARN = False
     if selected_index == 0: # module at all do noto fit this GPU - just allow to crash 
         selected_byte_size = active_modules_sorted[0][1]
+        selected_numel = active_modules_sorted[0][2].numel()
         selected_index = 1     
         # too_big_WARN = True 
 
@@ -455,7 +460,7 @@ def pick_modules_and_split_size(active_modules_sorted: list[tuple[str, int]], tr
 
     train_num_batches = train_num_samples // estimated_train_size + (1 if train_num_samples % estimated_train_size > 0 else 0)
     val_num_batches = val_num_samples // estimated_val_size + (1 if val_num_samples % estimated_val_size > 0 else 0)
-    print(f"Modules: {selected_module_names_str}\nSize: {selected_GB_size:.2f}GB/{total_memory_GB:.2f}GB\nTrain-val split: {estimated_train_size}/{train_num_samples} ({train_num_batches} splits), {estimated_val_size}/{val_num_samples} ({val_num_batches} splits). Total splits {train_num_batches * val_num_batches}")
+    print(f"Modules: {selected_module_names_str} {selected_numel}\nSize: {selected_GB_size:.2f}GB/{total_memory_GB:.2f}GB\nTrain-val split: {estimated_train_size}/{train_num_samples} ({train_num_batches} splits), {estimated_val_size}/{val_num_samples} ({val_num_batches} splits). Total splits {train_num_batches * val_num_batches}")
     return (selected_index, estimated_train_size, estimated_val_size)
 
 class CurrentActiveModules:

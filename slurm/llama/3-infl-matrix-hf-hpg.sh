@@ -19,7 +19,7 @@ task=${tasks[$SLURM_ARRAY_TASK_ID]}
 task_cwd=/blue/anshumanc.usf/nn-infl/llama/$task
 
 method_name=hf
-mem_koef=1.1
+mem_koef=1.5
 
 for run_id in {0..4}; do
 
