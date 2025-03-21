@@ -486,7 +486,7 @@ class CurrentActiveModules:
     
     def alloc_grads(self, num_samples):
         ''' Preserves the shape of params but adds dimension for samples '''
-        new_grads = [torch.zeros((num_samples, *param.shape), device=param.device) for _, _, param in self.cur_active_modules ]
+        new_grads = [torch.zeros((num_samples, *param.shape), dtype = param.dtype, device=param.device) for _, _, param in self.cur_active_modules ]
         return new_grads
     
     def get_cur_params(self):
@@ -792,7 +792,7 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
                 pickle.dump(common_tokens, file)
 
     methods_without_we = ['datainf', 'datainf0' ]
-    interaction_matrices = {method_name: {module_name: torch.zeros((len(valset), len(trainset)), device=device)                                             
+    interaction_matrices = {method_name: {module_name: torch.zeros((len(valset), len(trainset)), dtype=torch.bfloat16, device=device)                                             
                                             for module_name, _, module_params in active_modules
                                             if ((method_name in methods_without_we) and (module_params.numel() < 100000)) or
                                                 ((method_name not in methods_without_we) and ('_we_' not in method_name)) or 
