@@ -1,9 +1,9 @@
 #!/bin/bash -l
-#SBATCH --job-name=mistral-tune
+#SBATCH --job-name=m-i-d
 #SBATCH --time=72:00:00
-#SBATCH --output mistral-tune-%j.out
+#SBATCH --output m-i-d-%j.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/mistral
-#SBATCH -p hpg-ai # run on partition general
+#SBATCH -p hpg-ai
 #SBATCH --open-mode=append
 #SBATCH --gpus=1 # 1 GPU
 #SBATCH --mem=16G # default 4GB
@@ -18,10 +18,14 @@ task=${tasks[$SLURM_ARRAY_TASK_ID]}
 
 task_cwd=/blue/anshumanc.usf/nn-infl/mistral/$task
 
+method_name=datainf
+mem_koef=2.0
+
 for run_id in {0..4}; do
-    echo "Starting finetuning $task $run_id"
+
+    echo "Infl matrix $task $run_id $method_name"
     HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
-        /home/dvitel.usf/nn-infl/src/exp.py finetune --task=$task --model=mistralai/Mistral-7B-v0.3 \
-                 --num-epochs=15 --lr=0.0001 --unfreeze-regex=.\*\\.embed_tokens\\..\* --lora-targets=v_proj
-    echo "Done finetuning $task $run_id"
+        /home/dvitel.usf/nn-infl/src/exp.py infl-matrix --task=$task --methods=$method_name --mem-koef=$mem_koef --m-prefix=m_b --i-prefix=i_b
+    echo "----- Done $task $run_id $method_name"
+
 done

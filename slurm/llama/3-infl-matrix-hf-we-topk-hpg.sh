@@ -6,7 +6,7 @@
 #SBATCH -p hpg-ai
 #SBATCH --open-mode=append
 #SBATCH --gpus=1 # 1 GPU
-#SBATCH --mem=8G # default 4GB
+#SBATCH --mem=16G # default 4GB
 #SBATCH --array=0-3
 
 module load conda/24.7.1
