@@ -877,7 +877,7 @@ agg_methods = {
 def finetune2(task = 'mrpc',
          filter_method='infl', infl_method='datainf', module_pattern='', 
          filter_perc = 0.3, i_prefix='i', unfreeze_regex = None, agg_method = 'sum_mean', tag='',
-         seed2: int = 0):
+         seed2: int = 0, m_prefix = 'm'):
     
     if seed2 != 0: # seed is used for loading files, but seed2 to change init state
         rand_seed = seed + seed2
@@ -960,8 +960,14 @@ def finetune2(task = 'mrpc',
                                 low_rank=config['low_rank'],
                                 unfreeze_modules_regex=unfreeze_regex,
                                 all_token_ids = all_token_ids, mapping_tensor = mapping_tensor)
+    
+    best_model_path = os.path.join(cwd, f'{m_prefix}_2_b_{task}_{seed}')
+    last_model_path = os.path.join(cwd, f'{m_prefix}_2_l_{task}_{seed}')
+        
     eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, infl_dataloader, device, num_epochs, lr,
-                                    compute_gold_val_predictions=True)
+                                    compute_gold_val_predictions=True,
+                                    best_checkpoint_path=best_model_path,
+                                    last_checkpoint_path=last_model_path)                                    
 
     del lora_model, train_dataloader, eval_dataloader
 
