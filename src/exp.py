@@ -774,16 +774,19 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
             should_recompute = True
         if should_recompute:
             # need to compute common tokens         
+            vocab_remap = lora_model.get_input_embeddings().vocab_mapping.tolist()
             train_token_counts = {}
             for train_id in range(len(trainset)):
                 cur_train_token_counts = train_token_counts.setdefault(train_id, {})
                 for token_id in trainset[train_id]['input_ids']:
-                    cur_train_token_counts[token_id] = cur_train_token_counts.get(token_id, 0) + 1
+                    remapped_token_id = vocab_remap[token_id]
+                    cur_train_token_counts[remapped_token_id] = cur_train_token_counts.get(remapped_token_id, 0) + 1
             val_token_counts = {}
             for val_id in range(len(valset)):
                 cur_val_token_counts = val_token_counts.setdefault(val_id, {})
                 for token_id in valset[val_id]['input_ids']:
-                    cur_val_token_counts[token_id] = cur_val_token_counts.get(token_id, 0) + 1
+                    remapped_token_id = vocab_remap[token_id]
+                    cur_val_token_counts[remapped_token_id] = cur_val_token_counts.get(remapped_token_id, 0) + 1
             for train_id, train_token_count in train_token_counts.items():
                 for val_id, val_token_count in val_token_counts.items():
                     common_token_ids = set(train_token_count.keys()).intersection(val_token_count.keys())
