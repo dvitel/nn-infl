@@ -47,7 +47,7 @@ import evaluate
     #     self.task=task
     #     self.low_rank=low_rank
 
-def dropout_forward_hook(module: torch.nn.Module, input, output, p = 0.25):
+def dropout_forward_hook(module: torch.nn.Module, input, output, p = 0.05):
     result = torch.nn.functional.dropout(output, p=p, training=module.training)
     return result
 
