@@ -87,6 +87,7 @@ def build_LORA_model(model_name_or_path, target_modules, low_rank, unfreeze_modu
                                                                     offload_folder = os.path.join(os.environ['HF_HOME'], ".offload"),
                                                                     offload_state_dict = True)
     model.config.use_cache = False
+    model.config.pad_token_id = pad_token_id
         
     peft_config = LoraConfig(task_type="SEQ_CLS",
                                 inference_mode=False, 
@@ -144,7 +145,8 @@ def load_pretrained_LORA_model(model_name_or_path, unfreeze_modules_regex: Optio
         emb_params = torch.load(f"{model_name_or_path}/emb.pt")
         embeddings = emb_params.pop('weight')
         mapping = emb_params.pop('mapping')
-        emb = torch.nn.Embedding.from_pretrained(embeddings, **emb_params)
+        model.config.pad_token_id = emb_params['padding_idx'].item()
+        emb = torch.nn.Embedding.from_pretrained(embeddings, padding_idx = model.config.pad_token_id, **emb_params)
         emb.vocab_mapping = mapping
         emb.register_forward_pre_hook(vocab_remap_forward_pre_hook)
         model.set_input_embeddings(emb)
