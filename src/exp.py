@@ -103,8 +103,14 @@ def load_noisy_dataset_by_task(task, infl_ratio = 0.5, max_val_size = None, max_
 
 def load_tokenizer(tokenizer_name):
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, padding_side="right")
-    tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.pad_token_id = tokenizer.eos_token_id
+    #   `(tokenizer.pad_token = tokenizer.eos_token e.g.)` or add a new pad token via `tokenizer.add_special_tokens({'pad_token': '[PAD]'})`.    
+
+    if "llama" in tokenizer_name:          
+        tokenizer.pad_token = "<|reserved_special_token_0|>"
+        tokenizer.pad_token_id = tokenizer.vocab[tokenizer.pad_token]
+    if "mistral" in tokenizer_name:
+        tokenizer.pad_token = tokenizer.unk_token
+        tokenizer.pad_token_id = tokenizer.unk_token_id
     return tokenizer
 
 def preprocess(task = 'qnli', noise_ratio = 0.2, tokenizer_name='roberta-large'):
@@ -147,6 +153,18 @@ def preprocess(task = 'qnli', noise_ratio = 0.2, tokenizer_name='roberta-large')
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
     tokenized_datasets.save_to_disk(dataset_path)
 
+def present_token_ids(*dataloaders: DataLoader):
+    all_token_id_set = set()
+    for dl in dataloaders:
+        for batch in dl:
+            batch_ids = batch['input_ids']            
+            all_token_id_set.update(torch.unique(torch.flatten(batch_ids)).tolist())
+    all_token_id_list = list(all_token_id_set)
+    all_token_ids = torch.tensor(all_token_id_list)
+    old_to_new_token_id = {old_id: new_id for new_id, old_id in enumerate(all_token_id_list)}
+    mapping_tensor = torch.tensor([old_to_new_token_id.get(old_id, old_id) for old_id in range(torch.max(all_token_ids).item() + 1)])
+    return all_token_ids, mapping_tensor
+
 def build_loaders(dataset_path, tokenizer_name, batch_size = 32, shuffle_train = True, 
                     filter_fn = None):
     datasets = load_from_disk(dataset_path)
@@ -170,8 +188,11 @@ def build_loaders(dataset_path, tokenizer_name, batch_size = 32, shuffle_train =
     infl_dataloader = DataLoader(inflset, #.select(range(100)),
                                  shuffle=False, 
                                  collate_fn=collator, 
-                                 batch_size=batch_size)    
-    return train_dataloader, eval_dataloader, infl_dataloader, tokenizer
+                                 batch_size=batch_size)  
+
+    all_token_ids, mapping_tensor = present_token_ids(train_dataloader, eval_dataloader, infl_dataloader)
+
+    return train_dataloader, eval_dataloader, infl_dataloader, tokenizer, all_token_ids, mapping_tensor
 
 def info(model: str = 'roberta-large', unfreeze_regex = None, low_rank = 4, lora_targets: str = 'value', out_file: Optional[str] = None):
     ''' Loads and Prints information about the model '''
@@ -181,6 +202,14 @@ def info(model: str = 'roberta-large', unfreeze_regex = None, low_rank = 4, lora
                                 low_rank=low_rank, unfreeze_modules_regex=unfreeze_regex,
                                 model_info_file=(None if out_file is None else os.path.join(cwd, out_file)))
     del lora_model
+
+# def remap_vocab(tokenizer, all_token_ids: torch.Tensor):
+#     old_vocab = tokenizer.vocab
+#     new_vocab = { token_id: idx for idx, token_id in enumerate(all_token_ids.tolist()) }
+#     tokenizer.vocab = new_vocab
+#     tokenizer.ids_to_tokens = {idx: token for token, idx in new_vocab.items()}
+#     tokenizer.tokens_to_ids = new_vocab
+
     
 def finetune(task = 'mrpc', low_rank = 4,
          device = 'cuda', lr = 3e-4, model = 'roberta-large', batch_size = 32,
@@ -196,12 +225,13 @@ def finetune(task = 'mrpc', low_rank = 4,
                   num_epochs=num_epochs, target_modules=lora_targets, unfreeze_regex = unfreeze_regex)
 
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
-    train_dataloader, eval_dataloader, infl_dataloader, tokenizer = \
-        build_loaders(dataset_path, config['tokenizer_name'], batch_size)
+    train_dataloader, eval_dataloader, infl_dataloader, tokenizer, all_token_ids, mapping_tensor = \
+        build_loaders(dataset_path, config['tokenizer_name'], batch_size)    
 
-    lora_model = build_LORA_model(model_name_or_path=model,
+    lora_model = build_LORA_model(model_name_or_path=model, pad_token_id=tokenizer.pad_token_id,
                                 target_modules=lora_targets, 
-                                low_rank=low_rank, unfreeze_modules_regex=unfreeze_regex)
+                                low_rank=low_rank, unfreeze_modules_regex=unfreeze_regex,
+                                all_token_ids = all_token_ids, mapping_tensor = mapping_tensor)
     
     best_model_path = os.path.join(cwd, f'{m_prefix}_b_{task}_{seed}')
     last_model_path = os.path.join(cwd, f'{m_prefix}_l_{task}_{seed}')
@@ -914,13 +944,14 @@ def finetune2(task = 'mrpc',
         filter_fn = None
 
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
-    train_dataloader, eval_dataloader, infl_dataloader, _ = \
+    train_dataloader, eval_dataloader, infl_dataloader, tokenizer, all_token_ids, mapping_tensor = \
         build_loaders(dataset_path, config['tokenizer_name'], batch_size, filter_fn=filter_fn)
 
-    lora_model = build_LORA_model(model_name_or_path=model,
+    lora_model = build_LORA_model(model_name_or_path=model, pad_token_id=tokenizer.pad_token_id,
                                 target_modules=target_modules, 
                                 low_rank=config['low_rank'],
-                                unfreeze_modules_regex=unfreeze_regex)
+                                unfreeze_modules_regex=unfreeze_regex,
+                                all_token_ids = all_token_ids, mapping_tensor = mapping_tensor)
     eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, infl_dataloader, device, num_epochs, lr,
                                     compute_gold_val_predictions=True)
 

@@ -50,8 +50,8 @@ def load_noisy_dataset_by_task(run_id, task="mrpc", noise_ratio=0.1, group = 0):
 def create_dataloaders(run_id, tokenizer_name="roberta-large",
                        task="mrpc", noise_ratio=0.1, batch_size=32):
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, padding_side="right")
-    tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.pad_token_id = tokenizer.eos_token_id
+    # tokenizer.pad_token = tokenizer.eos_token
+    # tokenizer.pad_token_id = tokenizer.eos_token_id
 
     sentence1_key, sentence2_key = task_to_keys[task]
     def tokenize_function(examples, max_length=128):
@@ -98,8 +98,8 @@ def create_dataloaders(run_id, tokenizer_name="roberta-large",
 def create_filtered_dataloaders(run_id, tokenizer_name="roberta-large",
                                 task="mrpc", batch_size=32, noise_ratio=0.1, influence = [], filter_perc = 0.7):
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, padding_side="right")
-    tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.pad_token_id = tokenizer.eos_token_id
+    # tokenizer.pad_token = tokenizer.eos_token
+    # tokenizer.pad_token_id = tokenizer.eos_token_id
 
     sentence1_key, sentence2_key = task_to_keys[task]
     def tokenize_function(examples, max_length=128):

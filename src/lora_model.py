@@ -1,3 +1,4 @@
+from functools import partial
 import json
 import os
 import re
@@ -59,42 +60,33 @@ def unfreeze_modules(model: torch.nn.Module, unfreeze_modules_regex: Optional[st
                 module_true_name = ".".join(module_name.split(".")[:-1])
                 submodule = model.get_submodule(module_true_name)
                 submodule.register_forward_hook(dropout_forward_hook)
-        
+
+def vocab_remap_forward_pre_hook(module: torch.nn.Module, input):
+    ''' This hook is used to remap input ids '''
+    if hasattr(module, 'vocab_mapping'):
+        mapping = module.vocab_mapping
+        if mapping.device != input[0].device:
+            module.vocab_mapping = mapping.to(input[0].device)
+            mapping = module.vocab_mapping
+        updated_input = mapping[input[0]]
+        return (updated_input,*input[1:])
+    return input
+
 def build_LORA_model(model_name_or_path, target_modules, low_rank, unfreeze_modules_regex: Optional[str] = None,
-                        model_info_file: Optional[str] = None):
+                        model_info_file: Optional[str] = None, 
+                        all_token_ids: Optional[torch.Tensor] = None, mapping_tensor: Optional[torch.Tensor] = None,
+                        pad_token_id = None):
     '''
     unfreeze_modules - list of additional modules to unfreeze
+    all_token_ids - to resize embeddings
     '''
 
-    model_config = {}
-
-    # ["q_proj", "v_proj"]
-
-    model_config["torch_dtype"] = torch.bfloat16 
-    # NOTE: should we include qunatization?
-    # model_config["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True, load_in_4bit=False)
-    model_config["offload_folder"] = os.path.join(os.environ['HF_HOME'], ".offload") 
-    model_config["offload_state_dict"] = True
-        
-    #     # load a base model
-    #     base_model = LlamaForCausalLM.from_pretrained(
-    #         model_name_or_path,
-    #         # quantization_config=quantization_config,
-    #         torch_dtype=torch.bfloat16,
-    #         offload_folder="offload",
-    #         offload_state_dict=True,
-    #     )
-
-    #     # load a pre-trained model.
-    #     self.model = PeftModel.from_pretrained(base_model, self.adapter_path, is_trainable=True)
-    #     self.finetuned_config = LoraConfig.from_pretrained(pretrained_model_name_or_path=self.adapter_path)
-
-    # else:
     model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path,
                                                                     return_dict=True,
-                                                                    **model_config)
+                                                                    torch_dtype = torch.bfloat16,
+                                                                    offload_folder = os.path.join(os.environ['HF_HOME'], ".offload"),
+                                                                    offload_state_dict = True)
     model.config.use_cache = False
-    model.config.pad_token_id = model.config.eos_token_id
         
     peft_config = LoraConfig(task_type="SEQ_CLS",
                                 inference_mode=False, 
@@ -103,6 +95,20 @@ def build_LORA_model(model_name_or_path, target_modules, low_rank, unfreeze_modu
                                 lora_alpha=low_rank, 
                                 lora_dropout=0.05)
     model = get_peft_model(model, peft_config)
+
+    if all_token_ids is not None:
+        orig_embeddings = model.get_input_embeddings()
+        new_embedding_matrix = orig_embeddings.weight[all_token_ids]
+        new_pad_token_id = mapping_tensor[pad_token_id]
+        new_embedding_layer = torch.nn.Embedding.from_pretrained(new_embedding_matrix, freeze=False, padding_idx=new_pad_token_id,
+                                                                 max_norm = orig_embeddings.max_norm,
+                                                                 norm_type = orig_embeddings.norm_type,
+                                                                 scale_grad_by_freq = orig_embeddings.scale_grad_by_freq,
+                                                                 sparse = orig_embeddings.sparse)
+        new_embedding_layer.vocab_mapping = mapping_tensor
+        new_embedding_layer.register_forward_pre_hook(vocab_remap_forward_pre_hook)
+        model.set_input_embeddings(new_embedding_layer)
+        # model.tie_weights() - does not work - resort to save our custom embeddings
 
     unfreeze_modules(model, unfreeze_modules_regex)
 
@@ -132,14 +138,33 @@ def load_pretrained_LORA_model(model_name_or_path, unfreeze_modules_regex: Optio
     This function loads a pre-trained model.
     '''
     base_model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path)
+    base_model.config.use_cache = False
     model = PeftModel.from_pretrained(base_model, model_name_or_path, is_trainable=True)
-    model.config.use_cache = False
-    model.config.pad_token_id = model.config.eos_token_id
+    if os.path.exists(f"{model_name_or_path}/emb.pt"):
+        emb_params = torch.load(f"{model_name_or_path}/emb.pt")
+        embeddings = emb_params.pop('weight')
+        mapping = emb_params.pop('mapping')
+        emb = torch.nn.Embedding.from_pretrained(embeddings, **emb_params)
+        emb.vocab_mapping = mapping
+        emb.register_forward_pre_hook(vocab_remap_forward_pre_hook)
+        model.set_input_embeddings(emb)
 
     unfreeze_modules(model, unfreeze_modules_regex)
     
     model.print_trainable_parameters()
     return model
+
+def save_checkpoint(model: torch.nn.Module, checkpoint_path: str):
+    model.save_pretrained(checkpoint_path)
+    emb = model.get_input_embeddings()
+    emb_data = dict(weight = emb.weight.cpu().detach(), 
+                    padding_idx=emb.padding_idx,
+                    max_norm = emb.max_norm,
+                    norm_type = emb.norm_type,
+                    scale_grad_by_freq = emb.scale_grad_by_freq,
+                    sparse = emb.sparse,
+                    mapping = emb.vocab_mapping.cpu())
+    torch.save(emb_data, f"{checkpoint_path}/emb.pt")    
 
 def train_LORA_model(model: torch.nn.Module,
         train_dataloader: DataLoader,
@@ -211,6 +236,11 @@ def train_LORA_model(model: torch.nn.Module,
                         else:
                             grads_norms[name] = torch.norm(param.grad.view(-1))
             optimizer.zero_grad()
+
+        # NEXT is for debugging embedding shrinking
+        # emb.weight.grad[~torch.isin(torch.arange(emb.weight.shape[0], device='cuda'), emb.vocab_mapping[batch['input_ids']].unique())]
+        # emb = model.get_input_embeddings()
+        # torch.all(emb.weight.grad[~torch.isin(torch.arange(emb.weight.shape[0], device='cuda'), emb.vocab_mapping[batch['input_ids']].unique())] == 0)
 
         train_loss = []
         for step, batch in enumerate(tqdm(train_dataloader)):
@@ -301,7 +331,7 @@ def train_LORA_model(model: torch.nn.Module,
         if (best_checkpoint_path is not None) and (infl_accuracy is not None) and ((infl_accuracy > best_infl_accuracy) or ((infl_accuracy == best_infl_accuracy) and (infl_loss_value < best_infl_loss))):
             best_infl_loss = infl_loss_value
             best_infl_accuracy = infl_accuracy
-            model.save_pretrained(best_checkpoint_path)
+            save_checkpoint(model, best_checkpoint_path)
             if infl_logits is not None:
                 infl_logits_path = f"{best_checkpoint_path}/infl_logits.pt"
                 torch.save(infl_logits, infl_logits_path)
@@ -317,7 +347,7 @@ def train_LORA_model(model: torch.nn.Module,
     if len(gold_val_predictions) > 0:
         eval_metrics["gold_val_predictions"] = gold_val_predictions
     if last_checkpoint_path is not None:
-        model.save_pretrained(last_checkpoint_path)
+        save_checkpoint(model, last_checkpoint_path)
         if infl_logits is not None:
             infl_logits_path = f"{last_checkpoint_path}/infl_logits.pt"
             torch.save(infl_logits, infl_logits_path)
