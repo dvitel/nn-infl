@@ -1,7 +1,7 @@
 #!/bin/bash -l
-#SBATCH --job-name=ll-i-cos
+#SBATCH --job-name=i-hf-we
 #SBATCH --time=72:00:00
-#SBATCH --output ll-i-cos-%a.out
+#SBATCH --output i-hf-we-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/llama
 #SBATCH -p hpg-ai
 #SBATCH --open-mode=append
@@ -18,8 +18,8 @@ task=${tasks[$SLURM_ARRAY_TASK_ID]}
 
 task_cwd=/blue/anshumanc.usf/nn-infl/llama/$task
 
-method_name=cos
-mem_koef=1.1
+method_name='hf_we_'
+mem_koef=2.2
 
 for run_id in {0..4}; do
 

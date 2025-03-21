@@ -1,8 +1,8 @@
 #!/bin/bash -l
-#SBATCH --job-name=r-infl-hf-we-t
+#SBATCH --job-name=i-hf
 #SBATCH --time=72:00:00
-#SBATCH --output r-infl-hf-we-t-%j.out
-#SBATCH -D /blue/anshumanc.usf/nn-infl
+#SBATCH --output i-hf-%a.out
+#SBATCH -D /blue/anshumanc.usf/nn-infl/llama
 #SBATCH -p hpg-ai
 #SBATCH --open-mode=append
 #SBATCH --gpus=1 # 1 GPU
@@ -16,15 +16,16 @@ tasks=("qnli" "mrpc" "sst2" "qqp")
 
 task=${tasks[$SLURM_ARRAY_TASK_ID]}
 
-task_cwd=/blue/anshumanc.usf/nn-infl/$task
+task_cwd=/blue/anshumanc.usf/nn-infl/llama/$task
 
-method_name='hf_we_topk_10'
-mem_koef=2.2
+method_name=hf
+mem_koef=1.05
 
 for run_id in {0..4}; do
 
     echo "Infl matrix $task $run_id $method_name"
-    INFL_SEED=$run_id INFL_CWD=$task_cwd python /home/dvitel.usf/nn-infl/src/exp.py infl-matrix --task=$task --methods=$method_name --mem-koef=$mem_koef --m-prefix=m_b --i-prefix=i_b
+    HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
+        /home/dvitel.usf/nn-infl/src/exp.py infl-matrix --task=$task --methods=$method_name --mem-koef=$mem_koef --m-prefix=m_b --i-prefix=i_b
     echo "----- Done $task $run_id $method_name"
 
 done

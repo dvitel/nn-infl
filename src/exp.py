@@ -8,7 +8,10 @@ import re
 from time import time
 from typing import Optional
 
+import datasets
 from tqdm import tqdm
+
+from postprocess import dir_matrix_score, mean_matrix_score, rank_matrix_score
 os.environ['HF_HOME'] = os.path.join(os.getcwd(), '.cache')
 import pickle
 import random
@@ -858,26 +861,124 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
     #     fcntl.flock(file, fcntl.LOCK_UN)    
 
 
-def sum_mean_infl_atrices_agg(infl_matrices: list[torch.Tensor]):
-    ''' each matrix has 2 dims - infl samples vs train samples '''
-    sum_infl_matrix = None 
-    for infl_matrix in infl_matrices:
-        if sum_infl_matrix is None:
-            sum_infl_matrix = infl_matrix.clone()
-        else:
-            sum_infl_matrix += infl_matrix
-    train_means = torch.mean(sum_infl_matrix, dim=0)
-    return train_means
-
-
-agg_methods = {
-    "sum_mean": sum_mean_infl_atrices_agg
+agg_method_fns = {
+    "mean": mean_matrix_score, 
+    "mean_10": partial(mean_matrix_score, trim_ratio=0.1),
+    "mean_50": partial(mean_matrix_score, trim_ratio=0.5),
+    "dir": dir_matrix_score,
+    "rank": rank_matrix_score, 
+    # add here new agg methods
 }
 
-def finetune2(task = 'mrpc',
-         filter_method='infl', infl_method='datainf', module_pattern='', 
-         filter_perc = 0.3, i_prefix='i', unfreeze_regex = None, agg_method = 'sum_mean', tag='',
-         seed2: int = 0, m_prefix = 'm'):
+def load_ds_info(task_in_dir: str, task: str):
+    ds_path = os.path.join(task_in_dir, f'd_{task}_{seed}')
+    ds = datasets.load_from_disk(ds_path)
+    trainset = ds['train']
+    noise_list = trainset['noise']
+    trainset_labels = trainset['labels']
+    inflset = ds['infl']
+    inflset_labels = inflset['labels']
+    return noise_list, trainset_labels, inflset_labels
+
+def load_m_info(task_in_dir: str, task:str, m_prefix: str):
+    ''' Loads infl samples logits on the specified chehckpoint '''
+    logits_m_path = os.path.join(task_in_dir, f'{m_prefix}_{task}_{seed}', "infl_logits.pt")
+    logits = torch.load(logits_m_path)
+    return logits
+
+def scores(task = "qnli", infl_methods: str = 'datainf', agg_methods: str = 'mean', 
+                 i_prefix: str = 'i', m_prefix: str = 'm', group_file: str = '',
+                 include_total = True, s_prefix: str = 's', device = "cuda"):
+    infl_methods = infl_methods.split(',')
+    agg_method_names = agg_methods.split(',')
+    if group_file != "":
+        with open(os.path.join(cwd, group_file), 'r') as file:
+            module_groups_regex = json.load(file)
+        module_groups_patterns = {name: re.compile(pattern) for name, pattern in module_groups_regex.items()}
+    else:
+        module_groups_patterns = {}
+
+    noise_list, trainset_labels, inflset_labels = load_ds_info(cwd, task)
+    noise_mask = torch.tensor(noise_list, device = device)
+    trainset_labels = torch.tensor(trainset_labels, device = device)
+    inflset_labels = torch.tensor(inflset_labels, device = device)
+
+    inflset_logits = load_m_info(cwd, task, m_prefix).to(device)
+
+    scores_dict = {}
+
+    for infl_method in infl_methods:
+
+        if infl_method == 'rand': # random shuffle 
+            scores = torch.rand(trainset_labels.shape[0], dtype = torch.bfloat16, device = device)
+            scores_dict[(infl_method, '', '')] = scores
+            continue
+        if infl_method == 'denoise': # first noise, then shuffled clean
+            scores = torch.rand(trainset_labels.shape[0], dtype = torch.bfloat16, device = device)
+            scores[noise_mask] = -1.0
+            scores_dict[(infl_method, '', '')] = scores
+            continue
+
+        file_path = os.path.join(cwd, f'{i_prefix}_{infl_method}_{task}_{seed}.pt')
+        if not os.path.exists(file_path):
+            print(f"File {file_path} does not exist")
+            continue
+        matrix_dict = torch.load(file_path)        
+        module_names = list(matrix_dict.keys())
+        module_and_group_names = list(module_names)
+        # transpose all matrices 
+        for module_name in module_names:
+            matrix_dict[module_name] = matrix_dict[module_name].t().to(device) # first dim is train_sample now and second is infl val sample
+        if len(module_names) == 0:
+            continue
+        all_interactions = torch.stack([matrix_dict[module_name] for module_name in module_names], dim = 1)
+        for int_matrix in matrix_dict.values():
+            del int_matrix
+        # now the dimensions is train_sample * module * infl_val_sample
+
+        # create module views
+        module_interactions = [all_interactions[:, module_id:module_id+1] for module_id in range(len(module_names))]
+        group_modules = defaultdict(list)
+        for group_name, pattern in module_groups_patterns.items():
+            for module_id, module_name in enumerate(module_names):
+                if pattern.match(module_name):
+                    group_modules[group_name].append(module_id)
+
+        group_names = list(group_modules.keys())
+        module_and_group_names.extend(group_names)
+        for group_name in group_names:
+            group_module_ids = torch.tensor(group_modules[group_name], device = device)
+            module_interactions.append(all_interactions[:, group_module_ids])
+            del group_module_ids
+
+        if include_total:
+            module_interactions.append(all_interactions)
+            module_and_group_names.append('')
+                
+        scores = torch.zeros((len(agg_method_names), len(module_interactions), all_interactions.shape[0]), dtype=all_interactions.dtype, device = device)
+
+        for agg_method_id, agg_method_name in enumerate(agg_method_names):
+            for matrix_id, inf_matrix in enumerate(module_interactions):
+                agg_method_fn = agg_method_fns[agg_method_name] 
+                new_scores = agg_method_fn(inf_matrix, noise_mask = noise_mask, 
+                                       trainset_labels = trainset_labels, inflset_labels = inflset_labels, 
+                                       inflset_logits = inflset_logits, run_id = seed)
+                scores[agg_method_id, matrix_id] = new_scores
+                del new_scores
+                torch.cuda.empty_cache()                 
+
+        for agg_method_id, agg_method_name in enumerate(agg_method_names):
+            for module_id, module_name in enumerate(module_and_group_names):
+                scores_dict[(infl_method, agg_method_name, module_name)] = scores[agg_method_id, module_id]
+        torch.cuda.empty_cache() 
+
+    scores_path = os.path.join(cwd, f'{s_prefix}_{seed}.pt')
+    torch.save(scores_dict, scores_path)
+
+def finetune2(task = 'qnli',
+         infl_method='datainf', agg_method='', module_name = '',
+         filter_perc = 0.3, s_prefix='s', unfreeze_regex = None,
+         seed2: int = 0, m_prefix = 'm', metrics_file = 'metrics.jsonlist'):
     
     if seed2 != 0: # seed is used for loading files, but seed2 to change init state
         rand_seed = seed + seed2
@@ -889,11 +990,15 @@ def finetune2(task = 'mrpc',
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)    
-    finetune2_config=dict(filter_method=filter_method, task = task, seed = seed,
-                                 infl_method=infl_method, module_pattern=module_pattern, 
-                                 filter_perc=filter_perc, agg_method=agg_method, i_prefix = i_prefix,
+    scores_path = os.path.join(cwd, f'{s_prefix}_{seed}.pt')
+    best_model_path = os.path.join(cwd, f'{m_prefix}_2_b_{task}_{seed}')
+    last_model_path = os.path.join(cwd, f'{m_prefix}_2_l_{task}_{seed}')
+    finetune2_config=dict(task = task, seed = seed,
+                                 infl_method=infl_method, agg_method=agg_method, module_name=module_name,
+                                 filter_perc=filter_perc, source_scores_file=scores_path, target_lmodel_file=last_model_path,
+                                 target_bmodel_file=best_model_path,
                                  unfreeze_regex=unfreeze_regex, seed2 = seed2)
-    print(f"Finetune with modules: {module_pattern}")
+    print(f"Finetune with modules: {(infl_method, agg_method, module_name)}")
     num_epochs = config['num_epochs']
     device = config['device']
     lr = config['lr']
@@ -902,55 +1007,17 @@ def finetune2(task = 'mrpc',
     target_modules = config['target_modules']
     cancel_abs = []
     cancel_norm = []
-    if filter_method == "infl":
-        influences = torch.load(os.path.join(cwd, f'{i_prefix}_{infl_method}_{task}_{seed}.pt'))
-
-        module_names = [] # all modules
-        influence_matrices = []
-        if module_pattern == '':
-            for module in influences:
-                influence_matrices.append(influences[module])
-                cancel_abs.append(config['finetune']['cancel_abs'][module])
-                cancel_norm.append(config['finetune']['cancel_norm'][module])
-            finetune2_config['module_names'] = []
-        else:
-            pattern = re.compile(module_pattern)
-            for module in influences:
-                if pattern.match(module): 
-                    influence_matrices.append(influences[module])
-                    cancel_abs.append(config['finetune']['cancel_abs'][module])
-                    cancel_norm.append(config['finetune']['cancel_norm'][module])
-                    module_names.append(module)
-        finetune2_config['module_names'] = module_names
-        
-        # fine-tuning models
-
-        def infl_filter(train_dataset):
-            influence = agg_methods[agg_method](influence_matrices)
-            high_to_low_quality = torch.argsort(influence)
-            filter_len = int(filter_perc*len(high_to_low_quality))
-            filtered_indexes = high_to_low_quality[filter_len:].cpu().numpy()
-            return train_dataset.select(filtered_indexes)
-        filter_fn = infl_filter
-    elif filter_method == 'rand':
-        def rand_filter(train_dataset):
-            filter_len = int((1 - filter_perc)*len(train_dataset))
-            filtered_indexes = np.random.choice(len(train_dataset), filter_len, replace=False)
-            return train_dataset.select(filtered_indexes)
-        filter_fn = rand_filter        
-    elif filter_method == 'denoise':
-        # def denoise_map(example):
-        #     if example['noise']:
-        #         example['labels'] = 1 - example['labels'] 
-        #     return example               
-        def denoise_filter(train_dataset):
-            noise_arr = np.array(train_dataset['noise'])
-            selected_indexes = np.where(noise_arr == 0)[0]
-            return train_dataset.select(selected_indexes)
-        filter_fn = denoise_filter
-    else:
-        filter_fn = None
-
+    scores_dict = torch.load(scores_path)
+    scores = scores_dict[(infl_method, agg_method, module_name)]
+    train_idxs = torch.argsort(scores)
+    filter_len = int(filter_perc*len(train_idxs))
+    train_idxs_left = train_idxs[filter_len:].cpu().numpy()
+    noise_list = []
+    def denoise_filter(train_dataset, train_idxs_left = train_idxs_left):        
+        nonlocal noise_list
+        noise_list = train_dataset['noise']
+        return train_dataset.select(train_idxs_left)
+    filter_fn = denoise_filter    
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
     train_dataloader, eval_dataloader, infl_dataloader, tokenizer, all_token_ids, mapping_tensor = \
         build_loaders(dataset_path, config['tokenizer_name'], batch_size, filter_fn=filter_fn)
@@ -960,10 +1027,7 @@ def finetune2(task = 'mrpc',
                                 low_rank=config['low_rank'],
                                 unfreeze_modules_regex=unfreeze_regex,
                                 all_token_ids = all_token_ids, mapping_tensor = mapping_tensor)
-    
-    best_model_path = os.path.join(cwd, f'{m_prefix}_2_b_{task}_{seed}')
-    last_model_path = os.path.join(cwd, f'{m_prefix}_2_l_{task}_{seed}')
-        
+            
     eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, infl_dataloader, device, num_epochs, lr,
                                     compute_gold_val_predictions=True,
                                     best_checkpoint_path=best_model_path,
@@ -971,11 +1035,33 @@ def finetune2(task = 'mrpc',
 
     del lora_model, train_dataloader, eval_dataloader
 
-    metric_file = os.path.join(cwd, f'metrics.jsonlist')
+    metric_file = os.path.join(cwd, metrics_file)
     old_gold_val_predictions = np.array(config['finetune']['gold_val_predictions'])
     new_gold_val_predictions = np.array(eval_metrics['gold_val_predictions'])
     logits_change = (new_gold_val_predictions - old_gold_val_predictions).mean()
     eval_metrics['logits_change'] = logits_change
+
+    # noise detection rate metrics
+    noise_mask = torch.tensor(noise_list, device = train_idxs.device)
+    num_noise = noise_mask.sum()
+    noise_tensor = noise_mask[train_idxs]
+    ideal_area = noise_mask.shape[0] - (num_noise / 2)
+
+    del noise_mask
+
+    noise_detection_curve = torch.cumsum(noise_tensor, dim = -1, dtype = torch.float)
+    noise_detection_curve /= num_noise
+
+    auc_ndr = noise_detection_curve.sum(dim = -1) 
+    auc_ndr /= ideal_area
+
+    filtered = noise_detection_curve[filter_len]
+
+    eval_metrics["auc_ndr"] = auc_ndr.cpu().item()
+    eval_metrics["filtered"] = filtered.cpu().item()
+    eval_metrics["ndr_curve"] = noise_detection_curve.cpu().tolist()
+    eval_metrics["first_finetune"] = config['finetune']
+
     if len(cancel_abs) > 0:
         eval_metrics['cancel_abs'] = np.mean(cancel_abs)
     if len(cancel_norm) > 0:
@@ -983,14 +1069,14 @@ def finetune2(task = 'mrpc',
     del eval_metrics['gold_val_predictions']
     with open(metric_file, "a") as f:                
         fcntl.flock(f, fcntl.LOCK_EX)
-        f.write(json.dumps({**eval_metrics, 'config': finetune2_config, 'tag': tag}) + "\n")
+        f.write(json.dumps({**eval_metrics, 'config': finetune2_config}) + "\n")
         fcntl.flock(f, fcntl.LOCK_UN)    
 
     with torch.no_grad():
         torch.cuda.empty_cache()
 
 parser = argh.ArghParser()
-parser.add_commands([info, preprocess, finetune, grads, infl, infl_matrix, finetune2])
+parser.add_commands([info, preprocess, finetune, grads, infl, infl_matrix, scores, finetune2])
 
 def test_infl_vs_infl_matrix(file1: str, file2: str):
     infl = torch.load(file1)

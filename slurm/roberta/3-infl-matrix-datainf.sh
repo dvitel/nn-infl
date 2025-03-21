@@ -1,8 +1,8 @@
 #!/bin/bash -l
-#SBATCH --job-name=ll-i-hf
+#SBATCH --job-name=i-d
 #SBATCH --time=72:00:00
-#SBATCH --output ll-i-hf-%a.out
-#SBATCH -D /blue/anshumanc.usf/nn-infl/llama
+#SBATCH --output i-d-%j.out
+#SBATCH -D /blue/anshumanc.usf/nn-infl/roberta
 #SBATCH -p hpg-ai
 #SBATCH --open-mode=append
 #SBATCH --gpus=1 # 1 GPU
@@ -16,10 +16,10 @@ tasks=("qnli" "mrpc" "sst2" "qqp")
 
 task=${tasks[$SLURM_ARRAY_TASK_ID]}
 
-task_cwd=/blue/anshumanc.usf/nn-infl/llama/$task
+task_cwd=/blue/anshumanc.usf/nn-infl/roberta/$task
 
-method_name=hf
-mem_koef=1.05
+method_name=datainf
+mem_koef=2.0
 
 for run_id in {0..4}; do
 

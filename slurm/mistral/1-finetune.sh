@@ -1,7 +1,7 @@
 #!/bin/bash -l
 #SBATCH --job-name=mistral-tune
 #SBATCH --time=72:00:00
-#SBATCH --output mistral-tune-%j.out
+#SBATCH --output mistral-tune-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/mistral
 #SBATCH -p hpg-ai # run on partition general
 #SBATCH --open-mode=append

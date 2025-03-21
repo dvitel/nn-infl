@@ -1,12 +1,12 @@
 #!/bin/bash -l
-#SBATCH --job-name=ll-i-d
+#SBATCH --job-name=i-cos
 #SBATCH --time=72:00:00
-#SBATCH --output ll-i-d-%a.out
-#SBATCH -D /blue/anshumanc.usf/nn-infl/llama
+#SBATCH --output i-cos-%a.out
+#SBATCH -D /blue/anshumanc.usf/nn-infl/roberta
 #SBATCH -p hpg-ai
 #SBATCH --open-mode=append
 #SBATCH --gpus=1 # 1 GPU
-#SBATCH --mem=8G # default 4GB
+#SBATCH --mem=4G
 #SBATCH --array=0-3
 
 module load conda/24.7.1
@@ -16,10 +16,10 @@ tasks=("qnli" "mrpc" "sst2" "qqp")
 
 task=${tasks[$SLURM_ARRAY_TASK_ID]}
 
-task_cwd=/blue/anshumanc.usf/nn-infl/llama/$task
+task_cwd=/blue/anshumanc.usf/nn-infl/roberta/$task
 
-method_name=datainf
-mem_koef=2.0
+method_name=cos
+mem_koef=1.1
 
 for run_id in {0..4}; do
 

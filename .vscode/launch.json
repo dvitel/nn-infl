@@ -12,7 +12,51 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Preprocess: GLUE QNLI",
+            "name": "Info Roberta-large",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "info", "--model=roberta-large", "--unfreeze-regex=.*\\.word_embeddings\\..*", "--lora-targets=value", "--out-file=model-info.txt"
+            ],
+            "env": {
+                "INFL_SEED": "0",
+                "INFL_CWD": "./data/dev/roberta/qnli"
+            }
+        },
+        {
+            "name": "Info Llama",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "info", "--model=meta-llama/Llama-3.2-1B", "--unfreeze-regex=.*\\.embed_tokens\\..*", "--lora-targets=v_proj", "--out-file=model-info.txt"
+            ],
+            "env": {
+                "INFL_SEED": "0",
+                "INFL_CWD": "./data/dev/llama/qnli",
+                "HF_TOKEN": "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"
+            }
+        },        
+        {
+            "name": "Info Mistral",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "info", "--model=mistralai/Mistral-7B-v0.3", "--unfreeze-regex=.*\\.embed_tokens\\..*", "--lora-targets=v_proj", "--out-file=model-info.txt"
+            ],
+            "env": {
+                "INFL_SEED": "0",
+                "INFL_CWD": "./data/dev/mistral/qnli",
+                "HF_TOKEN": "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"
+            }
+        },
+        {
+            "name": "Preprocess: GLUE QNLI Distilbert",
             "type": "debugpy",
             "request": "launch",
             "program": "src/exp.py",
@@ -22,9 +66,39 @@
             ],
             "env": {
                 "INFL_SEED": "0",
-                "INFL_CWD": "./data/dev"
+                "INFL_CWD": "./data/dev/roberta/qnli"
             }
         },
+        {
+            "name": "Preprocess: GLUE QNLI LLAMA",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "preprocess", "--task=qnli", "--tokenizer-name=meta-llama/Llama-3.2-1B"
+            ],
+            "env": {
+                "INFL_SEED": "0",
+                "INFL_CWD": "./data/dev/llama/qnli",
+                "HF_TOKEN": "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"
+            }
+        },        
+        {
+            "name": "Preprocess: GLUE QNLI Mistral",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "preprocess", "--task=qnli", "--tokenizer-name=mistralai/Mistral-7B-v0.3"
+            ],
+            "env": {
+                "INFL_SEED": "0",
+                "INFL_CWD": "./data/dev/mistral/qnli",
+                "HF_TOKEN": "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"
+            }
+        },             
         {
             "name": "Preprocess: CIFAR10",
             "type": "debugpy",
@@ -121,13 +195,43 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "finetune", "--task=qnli", "--model=distilbert/distilroberta-base", "--num-epochs=4", "--unfreeze-regex=.*\\.word_embeddings\\..*", "--ignore-metrics", "--m-prefix=m2"
+                "finetune", "--task=qnli", "--model=distilbert/distilroberta-base", "--num-epochs=2", "--unfreeze-regex=.*\\.word_embeddings\\..*"
             ],
             "env": {
                 "INFL_SEED": "0",
-                "INFL_CWD": "./data/dev"
+                "INFL_CWD": "./data/dev/roberta/qnli"
             }
         },
+        {
+            "name": "Finetune: GLUE QNLI on LLAMA-3.2 1B",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "finetune", "--task=qnli", "--model=meta-llama/Llama-3.2-1B", "--num-epochs=2", "--unfreeze-regex=.*\\.embed_tokens\\..*",  "--m-prefix=m2", "--lora-targets=v_proj"
+            ],
+            "env": {
+                "INFL_SEED": "0",
+                "INFL_CWD": "./data/dev/llama/qnli",
+                "HF_TOKEN": "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"
+            }
+        },   
+        {
+            "name": "Finetune: GLUE QNLI on MISTRAL 0.3 7B",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "finetune", "--task=qnli", "--model=mistralai/Mistral-7B-v0.3", "--num-epochs=2", "--unfreeze-regex=.*\\.embed_tokens\\..*", "--ignore-metrics", "--m-prefix=m2", "--lora-targets=v_proj"
+            ],
+            "env": {
+                "INFL_SEED": "0",
+                "INFL_CWD": "./data/dev/mistral/qnli",
+                "HF_TOKEN": "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"
+            }
+        },                
         {
             "name": "Grad: GLUE QNLI on DistilRoberta",
             "type": "debugpy",
@@ -139,7 +243,7 @@
             ],
             "env": {
                 "INFL_SEED": "0",
-                "INFL_CWD": "./data/dev"
+                "INFL_CWD": "./data/dev/roberta/qnli"
             }
         },        
         {
@@ -153,7 +257,7 @@
             ],
             "env": {
                 "INFL_SEED": "0",
-                "INFL_CWD": "./data/dev"
+                "INFL_CWD": "./data/dev/roberta/qnli"
             }
         },
         {
@@ -163,13 +267,27 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "infl-matrix", "--task=qnli", "--methods=datainf", "--mem-koef=2.1", "--m-prefix=m2_b", "--i-prefix=i_b"
+                "infl-matrix", "--task=qnli", "--methods=hf_we_", "--mem-koef=1.1", "--m-prefix=m_b", "--i-prefix=i_b"
             ],
             "env": {
                 "INFL_SEED": "0",
-                "INFL_CWD": "./data/dev"
+                "INFL_CWD": "./data/dev/roberta/qnli"
             }
         },        
+        {
+            "name": "Scores: GLUE QNLI on DistilRoberta",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "scores", "--task=qnli", "--infl-methods=datainf,cos,hf,rand,denoise", "--agg-methods=mean,mean_10,mean_50,dir,rank", "--m-prefix=m_b", "--i-prefix=i_b", "--s-prefix=s_b", "--group-file=../groups.json"
+            ],
+            "env": {
+                "INFL_SEED": "0",
+                "INFL_CWD": "./data/dev/roberta/qnli"
+            }
+        },                
         {
             "name": "Finetune2: GLUE QNLI on DistilRoberta",
             "type": "debugpy",
@@ -177,11 +295,11 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "finetune2", "--task=qnli", "--filter-method=denoise", "--infl-method=cos", "--module-pattern=.*\\.layer\\.(1[6-9]|2[0-3])\\..*\\.lora_(A|B)\\..*", "--i-prefix=i_b", "--unfreeze-regex=.*\\.word_embeddings\\..*", "--seed2=10"
+                "finetune2", "--task=qnli", "--infl-method=datainf", "--agg-method=mean", "--module-name=00-05", "--s-prefix=s_b", "--unfreeze-regex=.*\\.word_embeddings\\..*", "--seed2=10"
             ],
             "env": {
                 "INFL_SEED": "0",
-                "INFL_CWD": "./data/dev"
+                "INFL_CWD": "./data/dev/roberta/qnli"
             }
         }        
     ]

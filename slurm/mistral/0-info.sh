@@ -1,7 +1,7 @@
 #!/bin/bash -l
-#SBATCH --job-name=0-info
+#SBATCH --job-name=info
 #SBATCH --time=72:00:00
-#SBATCH --output 0-info-%j.out
+#SBATCH --output info-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/mistral
 #SBATCH -p hpg-ai # run on partition general
 #SBATCH --open-mode=append

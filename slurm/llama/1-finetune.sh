@@ -1,12 +1,12 @@
 #!/bin/bash -l
-#SBATCH --job-name=ll-i-hf-we-t
+#SBATCH --job-name=llama-tune
 #SBATCH --time=72:00:00
-#SBATCH --output ll-i-hf-we-t-%a.out
+#SBATCH --output llama-tune-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/llama
-#SBATCH -p hpg-ai
+#SBATCH -p hpg-ai # run on partition general
 #SBATCH --open-mode=append
 #SBATCH --gpus=1 # 1 GPU
-#SBATCH --mem=8G # default 4GB
+#SBATCH --mem=16G # default 4GB
 #SBATCH --array=0-3
 
 module load conda/24.7.1
@@ -18,14 +18,10 @@ task=${tasks[$SLURM_ARRAY_TASK_ID]}
 
 task_cwd=/blue/anshumanc.usf/nn-infl/llama/$task
 
-method_name='hf_we_topk_10'
-mem_koef=2.2
-
 for run_id in {0..4}; do
-
-    echo "Infl matrix $task $run_id $method_name"
+    echo "Starting finetuning $task $run_id"
     HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
-        /home/dvitel.usf/nn-infl/src/exp.py infl-matrix --task=$task --methods=$method_name --mem-koef=$mem_koef --m-prefix=m_b --i-prefix=i_b
-    echo "----- Done $task $run_id $method_name"
-
+        /home/dvitel.usf/nn-infl/src/exp.py finetune --task=$task --model=meta-llama/Llama-3.2-1B \
+                 --num-epochs=15 --unfreeze-regex=.\*\\.embed_tokens\\..\* --lora-targets=v_proj
+    echo "Done finetuning $task $run_id"
 done

@@ -1,7 +1,7 @@
 #!/bin/bash -l
-#SBATCH --job-name=m-i-d
+#SBATCH --job-name=i-hf-we-t
 #SBATCH --time=72:00:00
-#SBATCH --output m-i-d-%a.out
+#SBATCH --output i-hf-we-t-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/mistral
 #SBATCH -p hpg-ai
 #SBATCH --open-mode=append
@@ -18,8 +18,8 @@ task=${tasks[$SLURM_ARRAY_TASK_ID]}
 
 task_cwd=/blue/anshumanc.usf/nn-infl/mistral/$task
 
-method_name=datainf
-mem_koef=2.0
+method_name='hf_we_topk_10'
+mem_koef=2.2
 
 for run_id in {0..4}; do
 

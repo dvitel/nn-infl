@@ -1,12 +1,12 @@
 #!/bin/bash -l
-#SBATCH --job-name=m-i-hf-we
+#SBATCH --job-name=i-hf-we
 #SBATCH --time=72:00:00
-#SBATCH --output m-i-hf-we-%a.out
-#SBATCH -D /blue/anshumanc.usf/nn-infl/mistral
+#SBATCH --output i-hf-we-%a.out
+#SBATCH -D /blue/anshumanc.usf/nn-infl/roberta
 #SBATCH -p hpg-ai
 #SBATCH --open-mode=append
 #SBATCH --gpus=1 # 1 GPU
-#SBATCH --mem=32G # default 4GB
+#SBATCH --mem=8G # default 4GB
 #SBATCH --array=0-3
 
 module load conda/24.7.1
@@ -16,7 +16,7 @@ tasks=("qnli" "mrpc" "sst2" "qqp")
 
 task=${tasks[$SLURM_ARRAY_TASK_ID]}
 
-task_cwd=/blue/anshumanc.usf/nn-infl/mistral/$task
+task_cwd=/blue/anshumanc.usf/nn-infl/roberta/$task
 
 method_name='hf_we_'
 mem_koef=2.2

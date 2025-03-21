@@ -1,12 +1,12 @@
 #!/bin/bash -l
 #SBATCH --job-name=roberta-tune
 #SBATCH --time=72:00:00
-#SBATCH --output roberta-tune-%j.out
+#SBATCH --output roberta-tune-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/roberta
 #SBATCH -p hpg-ai # run on partition general
 #SBATCH --open-mode=append
 #SBATCH --gpus=1 # 1 GPU
-#SBATCH --mem=16G # default 4GB
+#SBATCH --mem=8G # default 4GB
 #SBATCH --array=0-3
 
 module load conda/24.7.1
