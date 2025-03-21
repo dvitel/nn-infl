@@ -22,5 +22,5 @@ mkdir -p $task_cwd
 
 echo "Model info"
 HF_TOKEN=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 INFL_CWD=$task_cwd python \
-    /home/dvitel.usf/nn-infl/src/exp.py info --model=roberta-large --unfreeze-regex=.*\\.embed_tokens\\..* --lora-targets=v_proj --out-file=model-info.txt
+    /home/dvitel.usf/nn-infl/src/exp.py info --model=roberta-large --unfreeze-regex=.*\\.word_embeddings\\..* --lora-targets=value --out-file=model-info.txt
 echo "Done Model info"
