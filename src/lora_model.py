@@ -146,6 +146,7 @@ def load_pretrained_LORA_model(model_name_or_path, unfreeze_modules_regex: Optio
         embeddings = emb_params.pop('weight')
         mapping = emb_params.pop('mapping')
         model.config.pad_token_id = emb_params['padding_idx'].item()
+        del emb_params['padding_idx']
         emb = torch.nn.Embedding.from_pretrained(embeddings, padding_idx = model.config.pad_token_id, **emb_params)
         emb.vocab_mapping = mapping
         emb.register_forward_pre_hook(vocab_remap_forward_pre_hook)
