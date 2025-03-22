@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --job-name=llama-tune
+#SBATCH --job-name=l-tune
 #SBATCH --time=72:00:00
 #SBATCH --output llama-tune-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/llama

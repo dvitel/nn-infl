@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --job-name=mistral-tune
+#SBATCH --job-name=m-tune
 #SBATCH --time=72:00:00
 #SBATCH --output mistral-tune-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/mistral

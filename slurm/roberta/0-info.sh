@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --job-name=info
+#SBATCH --job-name=r-info
 #SBATCH --time=72:00:00
 #SBATCH --output info-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/roberta

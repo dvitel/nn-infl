@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --job-name=roberta-tune
+#SBATCH --job-name=r-tune
 #SBATCH --time=72:00:00
 #SBATCH --output roberta-tune-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/roberta

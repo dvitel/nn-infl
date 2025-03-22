@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --job-name=i-hf-we
+#SBATCH --job-name=m-i-hf-we
 #SBATCH --time=72:00:00
 #SBATCH --output i-hf-we-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/mistral

@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --job-name=i-d
+#SBATCH --job-name=l-i-d
 #SBATCH --time=72:00:00
 #SBATCH --output i-d-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/llama

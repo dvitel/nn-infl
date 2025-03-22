@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --job-name=glue
+#SBATCH --job-name=r-glue
 #SBATCH --time=72:00:00
 #SBATCH --output glue-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/roberta

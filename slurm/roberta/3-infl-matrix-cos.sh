@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --job-name=i-cos
+#SBATCH --job-name=r-i-cos
 #SBATCH --time=72:00:00
 #SBATCH --output i-cos-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/roberta

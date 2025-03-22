@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --job-name=score
+#SBATCH --job-name=r-score
 #SBATCH --time=96:00:00
 #SBATCH --output score-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/roberta
