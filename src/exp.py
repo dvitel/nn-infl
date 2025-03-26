@@ -980,6 +980,7 @@ def finetune2(task = 'qnli',
          filter_perc = 0.3, s_prefix='s', unfreeze_regex = None,
          seed2: int = 0, m_prefix = 'm', metrics_file = 'metrics.jsonlist'):
     
+    module_name = module_name.strip("\"")
     if seed2 != 0: # seed is used for loading files, but seed2 to change init state
         rand_seed = seed + seed2
         random.seed(rand_seed)
