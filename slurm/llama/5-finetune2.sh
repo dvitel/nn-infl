@@ -21,7 +21,7 @@ task_cwd=/blue/anshumanc.usf/nn-infl/llama/$task
 agg_method='mean'
 method_names=('hf' 'datainf' 'cos')
 seeds=(117 191)
-module_names=('WE' '' '00-03' '04-07' '08-11' '12-15' '00-03 A' '04-07 A' '08-11 A' '12-15 A' '00-03 B' '04-07 B' '08-11 B' '12-15 B')
+module_names=('WE' '' '00-03' '04-07' '08-11' '12-15' '00-03 A' '04-07 A' '08-11 A' '12-15 A' '00-03 B' '04-07 B' '08-11 B' '12-15 B' 'CL')
 
 for method_name in "${method_names[@]}"; do
     for seed2 in "${seeds[@]}"; do 
