@@ -22,5 +22,5 @@ mkdir -p $task_cwd
 
 echo "Model info"
 HF_TOKEN=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 INFL_CWD=$task_cwd python \
-    /home/dvitel.usf/nn-infl/src/exp.py info --model=meta-llama/Llama-3.2-1B --unfreeze-regex=.*\\.embed_tokens\\..* --lora-targets=v_proj --out-file=model-info.txt
+    /home/dvitel.usf/nn-infl/src/exp.py info --model=meta-llama/Llama-3.2-1B --unfreeze-regex=.*\\.embed_tokens\\..* --lora-targets=q_proj,v_proj --out-file=model-info.txt
 echo "Done Model info"

@@ -21,6 +21,7 @@ task_cwd=/blue/anshumanc.usf/nn-infl/roberta/$task
 for run_id in {0..4}; do
     echo "Starting finetuning $task $run_id"
     INFL_SEED=$run_id INFL_CWD=$task_cwd python \
-        /home/dvitel.usf/nn-infl/src/exp.py finetune --task=$task --model=roberta-large --num-epochs=15 --unfreeze-regex=.\*\\.word_embeddings\\..\*
+        /home/dvitel.usf/nn-infl/src/exp.py finetune --task=$task --model=roberta-large \
+        --unfreeze-regex=.\*\\.word_embeddings\\..\* --lora-targets=query,value
     echo "Done finetuning $task $run_id"
 done

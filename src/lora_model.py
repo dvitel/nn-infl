@@ -14,7 +14,7 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import (
     AutoModelForSequenceClassification, AutoModel,
-    get_linear_schedule_with_warmup,
+    get_cosine_schedule_with_warmup,
     BitsAndBytesConfig,
     LlamaForCausalLM,
     LlamaTokenizer
@@ -26,26 +26,6 @@ from peft import (
 )
 from datasets import Dataset
 import evaluate
-
-    # def __init__(self, 
-    #             model_name_or_path="roberta-large",
-    #             target_modules=["value"],
-    #             train_dataloader=None,
-    #             eval_dataloader=None,
-    #             device="cuda",
-    #             num_epochs=10,
-    #             lr=3e-4,
-    #             low_rank=2,
-    #             task="mrpc"):
-    #     self.model_name_or_path=model_name_or_path
-    #     self.target_modules=target_modules
-    #     self.train_dataloader=train_dataloader
-    #     self.eval_dataloader=eval_dataloader
-    #     self.device=device
-    #     self.num_epochs=num_epochs
-    #     self.lr=lr
-    #     self.task=task
-    #     self.low_rank=low_rank
 
 def dropout_forward_hook(module: torch.nn.Module, input, output, p = 0.05):
     result = torch.nn.functional.dropout(output, p=p, training=module.training)
@@ -63,14 +43,14 @@ def unfreeze_modules(model: torch.nn.Module, unfreeze_modules_regex: Optional[st
 
 def vocab_remap_forward_pre_hook(module: torch.nn.Module, input):
     ''' This hook is used to remap input ids '''
-    if hasattr(module, 'vocab_mapping'):
+    # if hasattr(module, 'vocab_mapping'):
+    mapping = module.vocab_mapping
+    if mapping.device != input[0].device:
+        module.vocab_mapping = mapping.to(input[0].device)
         mapping = module.vocab_mapping
-        if mapping.device != input[0].device:
-            module.vocab_mapping = mapping.to(input[0].device)
-            mapping = module.vocab_mapping
-        updated_input = mapping[input[0]]
-        return (updated_input,*input[1:])
-    return input
+    updated_input = mapping[input[0]]
+    return (updated_input,*input[1:])
+    # return input
 
 def build_LORA_model(model_name_or_path, target_modules, low_rank, unfreeze_modules_regex: Optional[str] = None,
                         model_info_file: Optional[str] = None, 
@@ -141,16 +121,16 @@ def load_pretrained_LORA_model(model_name_or_path, unfreeze_modules_regex: Optio
     base_model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path)
     base_model.config.use_cache = False
     model = PeftModel.from_pretrained(base_model, model_name_or_path, is_trainable=True)
-    if os.path.exists(f"{model_name_or_path}/emb.pt"):
-        emb_params = torch.load(f"{model_name_or_path}/emb.pt")
-        embeddings = emb_params.pop('weight')
-        mapping = emb_params.pop('mapping')
-        model.config.pad_token_id = emb_params['padding_idx'].item()
-        del emb_params['padding_idx']
-        emb = torch.nn.Embedding.from_pretrained(embeddings, padding_idx = model.config.pad_token_id, **emb_params)
-        emb.vocab_mapping = mapping
-        emb.register_forward_pre_hook(vocab_remap_forward_pre_hook)
-        model.set_input_embeddings(emb)
+    # if os.path.exists(f"{model_name_or_path}/emb.pt"):
+    emb_params = torch.load(f"{model_name_or_path}/emb.pt")
+    embeddings = emb_params.pop('weight')
+    mapping = emb_params.pop('mapping')
+    model.config.pad_token_id = emb_params['padding_idx'].item()
+    del emb_params['padding_idx']
+    emb = torch.nn.Embedding.from_pretrained(embeddings, padding_idx = model.config.pad_token_id, **emb_params)
+    emb.vocab_mapping = mapping
+    emb.register_forward_pre_hook(vocab_remap_forward_pre_hook)
+    model.set_input_embeddings(emb)
 
     unfreeze_modules(model, unfreeze_modules_regex)
     
@@ -175,11 +155,12 @@ def train_LORA_model(model: torch.nn.Module,
         infl_dataloader: Optional[DataLoader],
         device="cuda",
         num_epochs=10,
-        lr=3e-4,
+        lr=1e-4,
         compute_cancellation = False,
         compute_gold_val_predictions = False,
         best_checkpoint_path = None,
-        last_checkpoint_path = None):
+        last_checkpoint_path = None,
+        best_loss_model_path = None):
     '''
     This function fine-tunes a model for GLUE classification tasks. 
     For text generation tasks, please see `notebooks/Influential_Data_Identification-Llama2-Math.ipynb`.
@@ -194,9 +175,9 @@ def train_LORA_model(model: torch.nn.Module,
     optimizer = AdamW(params=model.parameters(), lr=lr)
 
     # Instantiate scheduler
-    lr_scheduler = get_linear_schedule_with_warmup(
+    lr_scheduler = get_cosine_schedule_with_warmup(
         optimizer=optimizer,
-        num_warmup_steps=0.06*(len(train_dataloader)*num_epochs),
+        num_warmup_steps=0.1*(len(train_dataloader)*num_epochs),
         num_training_steps=(len(train_dataloader)*num_epochs),
     )
 
@@ -332,12 +313,17 @@ def train_LORA_model(model: torch.nn.Module,
             infl_loss_value = None
             infl_accuracy = None
         if (best_checkpoint_path is not None) and (infl_accuracy is not None) and ((infl_accuracy > best_infl_accuracy) or ((infl_accuracy == best_infl_accuracy) and (infl_loss_value < best_infl_loss))):
-            best_infl_loss = infl_loss_value
-            best_infl_accuracy = infl_accuracy
             save_checkpoint(model, best_checkpoint_path)
             if infl_logits is not None:
-                infl_logits_path = f"{best_checkpoint_path}/infl_logits.pt"
-                torch.save(infl_logits, infl_logits_path)
+                torch.save(infl_logits, f"{best_checkpoint_path}/infl_logits.pt")
+        if (best_loss_model_path is not None) and (infl_loss_value is not None) and (infl_loss_value <= best_infl_loss):
+            save_checkpoint(model, best_loss_model_path)
+            if infl_logits is not None:
+                torch.save(infl_logits, f"{best_loss_model_path}/infl_logits.pt")
+        if (infl_loss_value is not None) and (best_infl_loss > infl_loss_value):
+            best_infl_loss = infl_loss_value
+        if (infl_accuracy is not None) and (best_infl_accuracy < infl_accuracy):
+            best_infl_accuracy = infl_accuracy
         if infl_accuracy is not None:            
             metrics.update(best_infl_loss = best_infl_loss, infl_loss = infl_loss_value, best_infl_accuracy = best_infl_accuracy, infl_accuracy = infl_accuracy)
         print(f"Epoch {(epoch+1)}:", metrics)

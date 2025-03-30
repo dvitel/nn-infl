@@ -18,7 +18,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "info", "--model=roberta-large", "--unfreeze-regex=.*\\.word_embeddings\\..*", "--lora-targets=value", "--out-file=model-info.txt"
+                "info", "--model=roberta-large", "--unfreeze-regex=.*\\.word_embeddings\\..*", "--lora-targets=query,value", "--out-file=model-info.txt"
             ],
             "env": {
                 "INFL_SEED": "0",
@@ -32,7 +32,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "info", "--model=meta-llama/Llama-3.2-1B", "--unfreeze-regex=.*\\.embed_tokens\\..*", "--lora-targets=v_proj", "--out-file=model-info.txt"
+                "info", "--model=meta-llama/Llama-3.2-1B", "--unfreeze-regex=.*\\.embed_tokens\\..*", "--lora-targets=q_proj,v_proj", "--out-file=model-info.txt"
             ],
             "env": {
                 "INFL_SEED": "0",
@@ -47,7 +47,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "info", "--model=mistralai/Mistral-7B-v0.3", "--unfreeze-regex=.*\\.embed_tokens\\..*", "--lora-targets=v_proj", "--out-file=model-info.txt"
+                "info", "--model=mistralai/Mistral-7B-v0.3", "--unfreeze-regex=.*\\.embed_tokens\\..*", "--lora-targets=q_proj,v_proj", "--out-file=model-info.txt"
             ],
             "env": {
                 "INFL_SEED": "0",
@@ -209,7 +209,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "finetune", "--task=qnli", "--model=meta-llama/Llama-3.2-1B", "--num-epochs=2", "--unfreeze-regex=.*\\.embed_tokens\\..*",  "--m-prefix=m2", "--lora-targets=v_proj"
+                "finetune", "--task=qnli", "--model=meta-llama/Llama-3.2-1B", "--num-epochs=2", "--unfreeze-regex=.*\\.embed_tokens\\..*",  "--m-prefix=m2", "--lora-targets=q_proj,v_proj"
             ],
             "env": {
                 "INFL_SEED": "0",
@@ -224,7 +224,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "finetune", "--task=qnli", "--model=mistralai/Mistral-7B-v0.3", "--num-epochs=2", "--unfreeze-regex=.*\\.embed_tokens\\..*", "--ignore-metrics", "--m-prefix=m2", "--lora-targets=v_proj"
+                "finetune", "--task=qnli", "--model=mistralai/Mistral-7B-v0.3", "--num-epochs=2", "--unfreeze-regex=.*\\.embed_tokens\\..*", "--ignore-metrics", "--m-prefix=m2", "--lora-targets=q_proj,v_proj"
             ],
             "env": {
                 "INFL_SEED": "0",
@@ -295,7 +295,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "finetune2", "--task=qnli", "--infl-method=datainf", "--agg-method=mean", "--module-name=00-05", "--s-prefix=s_b", "--unfreeze-regex=.*\\.word_embeddings\\..*", "--seed2=10"
+                "finetune2", "--task=qnli", "--infl-method=datainf", "--agg-method=mean", "--module-name=\"00-05 A\"", "--s-prefix=s_b", "--unfreeze-regex=.*\\.word_embeddings\\..*", "--seed2=10"
             ],
             "env": {
                 "INFL_SEED": "0",

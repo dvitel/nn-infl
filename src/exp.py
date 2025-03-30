@@ -215,7 +215,7 @@ def info(model: str = 'roberta-large', unfreeze_regex = None, low_rank = 4, lora
 
     
 def finetune(task = 'mrpc', low_rank = 4,
-         device = 'cuda', lr = 3e-4, model = 'roberta-large', batch_size = 32,
+         device = 'cuda', lr = 1e-4, model = 'roberta-large', batch_size = 32,
          num_epochs = 10, lora_targets: str = 'value', unfreeze_regex = None, 
          ignore_metrics = False, m_prefix = 'm'):
     ''' Fine tune specific model on specific task and save it to disk for later postprocessing'''
@@ -237,12 +237,14 @@ def finetune(task = 'mrpc', low_rank = 4,
                                 all_token_ids = all_token_ids, mapping_tensor = mapping_tensor)
     
     best_model_path = os.path.join(cwd, f'{m_prefix}_b_{task}_{seed}')
+    best_loss_model_path = os.path.join(cwd, f'{m_prefix}_bl_{task}_{seed}')
     last_model_path = os.path.join(cwd, f'{m_prefix}_l_{task}_{seed}')
 
     eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, infl_dataloader, device, num_epochs, lr,
                                     compute_cancellation=True, compute_gold_val_predictions=True, 
-                                    best_checkpoint_path=best_model_path,
-                                    last_checkpoint_path=last_model_path)
+                                    best_checkpoint_path = best_model_path,
+                                    last_checkpoint_path = last_model_path,
+                                    best_loss_model_path = best_loss_model_path)
 
     config['finetune'] = eval_metrics
     

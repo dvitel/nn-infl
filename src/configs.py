@@ -21,7 +21,7 @@ def generate_config(expno_name='mrpc',
     run_temp['model']=model
     run_temp['noise_ratio'] = 0.2
     run_temp['device'] = "cuda"
-    run_temp['lr'] = 3e-4
+    run_temp['lr'] = 1e-4
     
     run_temp['model_name_or_path'] = "distilbert/distilroberta-base" #"roberta-large"
     run_temp['batch_size'] = 32

@@ -1284,13 +1284,12 @@ def compute_ndr_metrics_table(base_dir_path: str, task='qnli',
 
     return df
 
-def output_table(df: pd.DataFrame, base_path: str, task: str, postprocess_dir = "postprocess"):
-    task_out_dir = os.path.join(base_path, task, postprocess_dir)
-    ndr_stats_file_path = os.path.join(task_out_dir, f"ndr_stats.csv")
+def output_table(df: pd.DataFrame, base_path: str, task: str):
+    ndr_stats_file_path = os.path.join(base_path, f"{task}_ndr_stats.csv")
     
     df.to_csv(ndr_stats_file_path, index = False)
 
-    stats_file_path = os.path.join(task_out_dir, "ndr_stats_simple.txt")
+    stats_file_path = os.path.join(base_path, f"{task}_ndr_stats_simple.txt")
     with open(stats_file_path, "w") as stats_file:
         print(tabulate(df, headers = 'keys', tablefmt="github", floatfmt=".3f", showindex=True), file = stats_file)
     pass 
@@ -1406,8 +1405,1278 @@ def draw_ft2_metric2(task: str, infile: str, outfile: str, metric = 'accuracy', 
     plt.savefig(outfile)  
     plt.clf()  
 
+def draw_ft2_metric3(infile: str, outfile: str, metric = 'accuracy', method_dict: dict = {}, draw_diff = False):
+    with open(infile, 'r') as f:
+        json_lines = f.readlines()
+    all_metrics = [json.loads(l) for l in json_lines]
+    method_metrics = defaultdict(list)
+    for metrics in all_metrics:
+        if draw_diff:
+            before_metric_values = metrics['first_finetune'][metric] 
+            after_metric_values = metrics[metric]
+            metric_values = [a - b for a, b in zip(after_metric_values, before_metric_values)]
+        else:
+            metric_values = metrics[metric]
+        task = metrics['config']['task']
+        infl_method = metrics['config']['infl_method']
+        agg_method = metrics['config']['agg_method']                
+        module_name = metrics['config']['module_name']
+
+        key = (infl_method, agg_method, module_name)
+        if key not in method_dict:
+            continue
+        method_metrics[key].append(metric_values)
+
+    method_metrics_flat = {k: [v3 for v2 in v for v3 in v2] for k, v in method_metrics.items()}
+    method_metric_ranks = get_avg_ranks(method_metrics_flat)
+
+    method_names = sorted(method_metrics.keys(), key = method_metric_ranks.get)
+    plt.ioff()
+
+    handles_ = []
+
+    for i, (infl_method, agg_method, module_name) in enumerate(method_names):
+        metrics = method_metrics[(infl_method, agg_method, module_name)]
+        metric_values = np.array(metrics) * 100
+        mean = np.mean(metric_values, axis=0)
+        confidence_level = 0.95
+        degrees_freedom = metric_values.shape[0] - 1
+        sample_standard_error = stats.sem(metric_values, axis=0)
+        confidence_interval = stats.t.interval(confidence_level, degrees_freedom, mean, sample_standard_error)
+        min_v = confidence_interval[0]
+        max_v = confidence_interval[1]
+        method_settings = method_dict[(infl_method, agg_method, module_name)]
+        default_args = dict(marker='o', markersize=4, linestyle='none', linewidth=1, color = method_settings['color'])
+        draw_full = False
+        if infl_method == 'denoise':
+            default_args['linestyle']='--'
+            default_args['markersize'] = 0
+            draw_full = True 
+        if infl_method == 'rand':
+            default_args['linestyle']='-.'
+            default_args['markersize'] = 0
+            draw_full = True 
+        # xs = np.arange(len(mean)) + 1
+        xs = np.arange(len(mean)) + 1 + ((i - len(method_metrics) // 2) * 0.075)  # Shift x-coordinates slightly
+        line = plt.plot(xs, mean, zorder=1, **default_args)
+        if draw_full:
+            plt.fill_between(xs, min_v, max_v, alpha=.05, color = line[0].get_color(), linewidth=0)
+        else:
+            plt.errorbar(xs, mean, yerr=[mean - min_v, max_v - mean], alpha=.5, fmt='none', ecolor=line[0].get_color(), capsize=2, linewidth=1, zorder=0)
+        handles_.append((line[0], method_settings['legend_name'], method_settings['legend_order']))
+    
+    handles_.sort(key = lambda x: x[2])
+    ordered_handles = [h[0] for h in handles_]
+    ordered_labels = [h[1] for h in handles_]
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy, \\%')
+    # plt.xticks(fontsize=12)
+    # plt.yticks(fontsize=12)
+    plt.legend(ordered_handles, ordered_labels, fontsize='small')
+    plt.title(f'{task.upper()} 70\\% filtered finetuning', fontsize=15)
+    plt.tight_layout()
+    plt.savefig(outfile)  
+    plt.clf()  
 
 if __name__ == "__main__":
+
+    draw_ft2_metric3('./data/mistral/sst2.jsonlist',
+                     './data/mistral/sst2-acc-hf.pdf',
+                     method_dict={
+                         ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+                         ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+                         ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+                         ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+                         ('hf', 'mean', '00-07'): {'color': '#2ca02c', 'legend_name': 'hf, 00-07', 'legend_order': 3},
+                         ('hf', 'mean', '08-15'): {'color': '#d62728', 'legend_name': 'hf, 08-15', 'legend_order': 4},
+                         ('hf', 'mean', '16-23'): {'color': '#8c564b', 'legend_name': 'hf, 16-23', 'legend_order': 5},
+                         ('hf', 'mean', '24-31'): {'color': '#e377c2', 'legend_name': 'hf, 24-31', 'legend_order': 6},
+                        #  ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+                         ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+                     })
+
+    draw_ft2_metric3('./data/mistral/sst2.jsonlist',
+                     './data/mistral/sst2-acc-cos.pdf',
+                     method_dict={
+                         ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+                        #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+                        #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+                         ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+                         ('cos', 'mean', '00-07'): {'color': '#2ca02c', 'legend_name': 'cos, 00-07', 'legend_order': 3},
+                         ('cos', 'mean', '08-15'): {'color': '#d62728', 'legend_name': 'cos, 08-15', 'legend_order': 4},
+                         ('cos', 'mean', '16-23'): {'color': '#8c564b', 'legend_name': 'cos, 16-23', 'legend_order': 5},
+                         ('cos', 'mean', '24-31'): {'color': '#e377c2', 'legend_name': 'cos, 24-31', 'legend_order': 6},
+                        #  ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+                         ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+                     })    
+    
+    draw_ft2_metric3('./data/mistral/sst2.jsonlist',
+                     './data/mistral/sst2-acc-datainf.pdf',
+                     method_dict={
+                         ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+                        #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+                        #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+                         ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+                         ('datainf', 'mean', '00-07'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-07', 'legend_order': 3},
+                         ('datainf', 'mean', '08-15'): {'color': '#d62728', 'legend_name': 'datainf, 08-15', 'legend_order': 4},
+                         ('datainf', 'mean', '16-23'): {'color': '#8c564b', 'legend_name': 'datainf, 16-23', 'legend_order': 5},
+                         ('datainf', 'mean', '24-31'): {'color': '#e377c2', 'legend_name': 'datainf, 24-31', 'legend_order': 6},
+                        #  ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+                         ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+                     })        
+
+    pass     
+
+    draw_ft2_metric3('./data/mistral/qqp.jsonlist',
+                     './data/mistral/qqp-acc-hf.pdf',
+                     method_dict={
+                         ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+                         ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+                         ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+                         ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+                         ('hf', 'mean', '00-07'): {'color': '#2ca02c', 'legend_name': 'hf, 00-07', 'legend_order': 3},
+                         ('hf', 'mean', '08-15'): {'color': '#d62728', 'legend_name': 'hf, 08-15', 'legend_order': 4},
+                         ('hf', 'mean', '16-23'): {'color': '#8c564b', 'legend_name': 'hf, 16-23', 'legend_order': 5},
+                         ('hf', 'mean', '24-31'): {'color': '#e377c2', 'legend_name': 'hf, 24-31', 'legend_order': 6},
+                        #  ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+                         ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+                     })
+
+    draw_ft2_metric3('./data/mistral/qqp.jsonlist',
+                     './data/mistral/qqp-acc-cos.pdf',
+                     method_dict={
+                         ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+                        #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+                        #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+                         ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+                         ('cos', 'mean', '00-07'): {'color': '#2ca02c', 'legend_name': 'cos, 00-07', 'legend_order': 3},
+                         ('cos', 'mean', '08-15'): {'color': '#d62728', 'legend_name': 'cos, 08-15', 'legend_order': 4},
+                         ('cos', 'mean', '16-23'): {'color': '#8c564b', 'legend_name': 'cos, 16-23', 'legend_order': 5},
+                         ('cos', 'mean', '24-31'): {'color': '#e377c2', 'legend_name': 'cos, 24-31', 'legend_order': 6},
+                        #  ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+                        #  ('cos', 'mean', ''): {'color': '#7f7f7f', 'legend_name': 'cos, total', 'legend_order': 7.5},
+                         ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+                     })    
+
+    pass
+    
+    draw_ft2_metric3('./data/mistral/qqp.jsonlist',
+                     './data/mistral/qqp-acc-datainf.pdf',
+                     method_dict={
+                         ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+                        #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+                        #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+                         ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+                         ('datainf', 'mean', '00-07'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-07', 'legend_order': 3},
+                         ('datainf', 'mean', '08-15'): {'color': '#d62728', 'legend_name': 'datainf, 08-15', 'legend_order': 4},
+                         ('datainf', 'mean', '16-23'): {'color': '#8c564b', 'legend_name': 'datainf, 16-23', 'legend_order': 5},
+                         ('datainf', 'mean', '24-31'): {'color': '#e377c2', 'legend_name': 'datainf, 24-31', 'legend_order': 6},
+                        #  ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+                         ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+                     })        
+
+    pass     
+
+    draw_ft2_metric3('./data/mistral/qnli.jsonlist',
+                     './data/mistral/qnli-acc-hf.pdf',
+                     method_dict={
+                         ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+                         ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+                         ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+                         ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+                         ('hf', 'mean', '00-07'): {'color': '#2ca02c', 'legend_name': 'hf, 00-07', 'legend_order': 3},
+                         ('hf', 'mean', '08-15'): {'color': '#d62728', 'legend_name': 'hf, 08-15', 'legend_order': 4},
+                         ('hf', 'mean', '16-23'): {'color': '#8c564b', 'legend_name': 'hf, 16-23', 'legend_order': 5},
+                         ('hf', 'mean', '24-31'): {'color': '#e377c2', 'legend_name': 'hf, 24-31', 'legend_order': 6},
+                        #  ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+                         ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+                     })
+
+    draw_ft2_metric3('./data/mistral/qnli.jsonlist',
+                     './data/mistral/qnli-acc-cos.pdf',
+                     method_dict={
+                         ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+                        #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+                        #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+                         ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+                         ('cos', 'mean', '00-07'): {'color': '#2ca02c', 'legend_name': 'cos, 00-07', 'legend_order': 3},
+                         ('cos', 'mean', '08-15'): {'color': '#d62728', 'legend_name': 'cos, 08-15', 'legend_order': 4},
+                         ('cos', 'mean', '16-23'): {'color': '#8c564b', 'legend_name': 'cos, 16-23', 'legend_order': 5},
+                         ('cos', 'mean', '24-31'): {'color': '#e377c2', 'legend_name': 'cos, 24-31', 'legend_order': 6},
+                        #  ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+                         ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+                     })    
+    
+    draw_ft2_metric3('./data/mistral/qnli.jsonlist',
+                     './data/mistral/qnli-acc-datainf.pdf',
+                     method_dict={
+                         ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+                        #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+                        #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+                         ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+                         ('datainf', 'mean', '00-07'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-07', 'legend_order': 3},
+                         ('datainf', 'mean', '08-15'): {'color': '#d62728', 'legend_name': 'datainf, 08-15', 'legend_order': 4},
+                         ('datainf', 'mean', '16-23'): {'color': '#8c564b', 'legend_name': 'datainf, 16-23', 'legend_order': 5},
+                         ('datainf', 'mean', '24-31'): {'color': '#e377c2', 'legend_name': 'datainf, 24-31', 'legend_order': 6},
+                        #  ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+                         ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+                     })        
+
+    pass 
+
+    draw_ft2_metric3('./data/mistral/mrpc.jsonlist',
+                     './data/mistral/mrpc-acc-hf.pdf',
+                     method_dict={
+                         ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+                         ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+                         ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+                         ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+                         ('hf', 'mean', '00-07'): {'color': '#2ca02c', 'legend_name': 'hf, 00-07', 'legend_order': 3},
+                         ('hf', 'mean', '08-15'): {'color': '#d62728', 'legend_name': 'hf, 08-15', 'legend_order': 4},
+                         ('hf', 'mean', '16-23'): {'color': '#8c564b', 'legend_name': 'hf, 16-23', 'legend_order': 5},
+                         ('hf', 'mean', '24-31'): {'color': '#e377c2', 'legend_name': 'hf, 24-31', 'legend_order': 6},
+                        #  ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+                         ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+                     })
+
+    draw_ft2_metric3('./data/mistral/mrpc.jsonlist',
+                     './data/mistral/mrpc-acc-cos.pdf',
+                     method_dict={
+                         ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+                        #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+                        #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+                         ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+                         ('cos', 'mean', '00-07'): {'color': '#2ca02c', 'legend_name': 'cos, 00-07', 'legend_order': 3},
+                         ('cos', 'mean', '08-15'): {'color': '#d62728', 'legend_name': 'cos, 08-15', 'legend_order': 4},
+                         ('cos', 'mean', '16-23'): {'color': '#8c564b', 'legend_name': 'cos, 16-23', 'legend_order': 5},
+                         ('cos', 'mean', '24-31'): {'color': '#e377c2', 'legend_name': 'cos, 24-31', 'legend_order': 6},
+                        #  ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+                         ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+                     })    
+    
+    draw_ft2_metric3('./data/mistral/mrpc.jsonlist',
+                     './data/mistral/mrpc-acc-datainf.pdf',
+                     method_dict={
+                         ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+                        #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+                        #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+                         ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+                         ('datainf', 'mean', '00-07'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-07', 'legend_order': 3},
+                         ('datainf', 'mean', '08-15'): {'color': '#d62728', 'legend_name': 'datainf, 08-15', 'legend_order': 4},
+                         ('datainf', 'mean', '16-23'): {'color': '#8c564b', 'legend_name': 'datainf, 16-23', 'legend_order': 5},
+                         ('datainf', 'mean', '24-31'): {'color': '#e377c2', 'legend_name': 'datainf, 24-31', 'legend_order': 6},
+                        #  ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+                         ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+                     })        
+    
+    pass    
+    
+
+    # draw_ft2_metric3('./data/roberta-1/sst2.jsonlist',
+    #                  './data/roberta-1/sst2-iacc-hf.pdf',  metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'hf, 00-05', 'legend_order': 3},
+    #                      ('hf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'hf, 06-11', 'legend_order': 4},
+    #                      ('hf', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'hf, 12-17', 'legend_order': 5},
+    #                      ('hf', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'hf, 18-23', 'legend_order': 6},
+    #                     #  ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/roberta-1/sst2.jsonlist',
+    #                  './data/roberta-1/sst2-iacc-cos.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'cos, 00-05', 'legend_order': 3},
+    #                      ('cos', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'cos, 06-11', 'legend_order': 4},
+    #                      ('cos', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'cos, 12-17', 'legend_order': 5},
+    #                      ('cos', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'cos, 18-23', 'legend_order': 6},
+    #                     #  ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+    
+    # draw_ft2_metric3('./data/roberta-1/sst2.jsonlist',
+    #                  './data/roberta-1/sst2-iacc-datainf.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-05', 'legend_order': 3},
+    #                      ('datainf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'datainf, 06-11', 'legend_order': 4},
+    #                      ('datainf', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'datainf, 12-17', 'legend_order': 5},
+    #                      ('datainf', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'datainf, 18-23', 'legend_order': 6},
+    #                     #  ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+
+    # pass     
+
+    # draw_ft2_metric3('./data/roberta-1/qqp.jsonlist',
+    #                  './data/roberta-1/qqp-iacc-hf.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'hf, 00-05', 'legend_order': 3},
+    #                      ('hf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'hf, 06-11', 'legend_order': 4},
+    #                      ('hf', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'hf, 12-17', 'legend_order': 5},
+    #                      ('hf', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'hf, 18-23', 'legend_order': 6},
+    #                     #  ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/roberta-1/qqp.jsonlist',
+    #                  './data/roberta-1/qqp-iacc-cos.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'cos, 00-05', 'legend_order': 3},
+    #                      ('cos', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'cos, 06-11', 'legend_order': 4},
+    #                      ('cos', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'cos, 12-17', 'legend_order': 5},
+    #                      ('cos', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'cos, 18-23', 'legend_order': 6},
+    #                     #  ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                     #  ('cos', 'mean', ''): {'color': '#7f7f7f', 'legend_name': 'cos, total', 'legend_order': 7.5},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+
+    # pass
+    
+    # draw_ft2_metric3('./data/roberta-1/qqp.jsonlist',
+    #                  './data/roberta-1/qqp-iacc-datainf.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-05', 'legend_order': 3},
+    #                      ('datainf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'datainf, 06-11', 'legend_order': 4},
+    #                      ('datainf', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'datainf, 12-17', 'legend_order': 5},
+    #                      ('datainf', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'datainf, 18-23', 'legend_order': 6},
+    #                     #  ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+
+    # pass     
+
+    # draw_ft2_metric3('./data/roberta-1/qnli.jsonlist',
+    #                  './data/roberta-1/qnli-iacc-hf.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'hf, 00-05', 'legend_order': 3},
+    #                      ('hf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'hf, 06-11', 'legend_order': 4},
+    #                      ('hf', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'hf, 12-17', 'legend_order': 5},
+    #                      ('hf', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'hf, 18-23', 'legend_order': 6},
+    #                     #  ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/roberta-1/qnli.jsonlist',
+    #                  './data/roberta-1/qnli-iacc-cos.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'cos, 00-05', 'legend_order': 3},
+    #                      ('cos', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'cos, 06-11', 'legend_order': 4},
+    #                      ('cos', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'cos, 12-17', 'legend_order': 5},
+    #                      ('cos', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'cos, 18-23', 'legend_order': 6},
+    #                     #  ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+    
+    # draw_ft2_metric3('./data/roberta-1/qnli.jsonlist',
+    #                  './data/roberta-1/qnli-iacc-datainf.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-05', 'legend_order': 3},
+    #                      ('datainf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'datainf, 06-11', 'legend_order': 4},
+    #                      ('datainf', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'datainf, 12-17', 'legend_order': 5},
+    #                      ('datainf', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'datainf, 18-23', 'legend_order': 6},
+    #                     #  ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+
+    # pass 
+
+    # draw_ft2_metric3('./data/roberta-1/mrpc.jsonlist',
+    #                  './data/roberta-1/mrpc-iacc-hf.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'hf, 00-05', 'legend_order': 3},
+    #                      ('hf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'hf, 06-11', 'legend_order': 4},
+    #                      ('hf', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'hf, 12-17', 'legend_order': 5},
+    #                      ('hf', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'hf, 18-23', 'legend_order': 6},
+    #                     #  ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/roberta-1/mrpc.jsonlist',
+    #                  './data/roberta-1/mrpc-iacc-cos.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'cos, 00-05', 'legend_order': 3},
+    #                      ('cos', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'cos, 06-11', 'legend_order': 4},
+    #                      ('cos', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'cos, 12-17', 'legend_order': 5},
+    #                      ('cos', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'cos, 18-23', 'legend_order': 6},
+    #                     #  ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+    
+    # draw_ft2_metric3('./data/roberta-1/mrpc.jsonlist',
+    #                  './data/roberta-1/mrpc-iacc-datainf.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-05', 'legend_order': 3},
+    #                      ('datainf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'datainf, 06-11', 'legend_order': 4},
+    #                      ('datainf', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'datainf, 12-17', 'legend_order': 5},
+    #                      ('datainf', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'datainf, 18-23', 'legend_order': 6},
+    #                     #  ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+    
+    # pass    
+
+    # draw_ft2_metric3('./data/roberta-1/sst2.jsonlist',
+    #                  './data/roberta-1/sst2-acc-hf.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'hf, 00-05', 'legend_order': 3},
+    #                      ('hf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'hf, 06-11', 'legend_order': 4},
+    #                      ('hf', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'hf, 12-17', 'legend_order': 5},
+    #                      ('hf', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'hf, 18-23', 'legend_order': 6},
+    #                     #  ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/roberta-1/sst2.jsonlist',
+    #                  './data/roberta-1/sst2-acc-cos.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'cos, 00-05', 'legend_order': 3},
+    #                      ('cos', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'cos, 06-11', 'legend_order': 4},
+    #                      ('cos', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'cos, 12-17', 'legend_order': 5},
+    #                      ('cos', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'cos, 18-23', 'legend_order': 6},
+    #                     #  ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+    
+    # draw_ft2_metric3('./data/roberta-1/sst2.jsonlist',
+    #                  './data/roberta-1/sst2-acc-datainf.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-05', 'legend_order': 3},
+    #                      ('datainf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'datainf, 06-11', 'legend_order': 4},
+    #                      ('datainf', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'datainf, 12-17', 'legend_order': 5},
+    #                      ('datainf', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'datainf, 18-23', 'legend_order': 6},
+    #                     #  ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+
+    # pass     
+
+    # draw_ft2_metric3('./data/roberta-1/qqp.jsonlist',
+    #                  './data/roberta-1/qqp-acc-hf.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'hf, 00-05', 'legend_order': 3},
+    #                      ('hf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'hf, 06-11', 'legend_order': 4},
+    #                      ('hf', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'hf, 12-17', 'legend_order': 5},
+    #                      ('hf', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'hf, 18-23', 'legend_order': 6},
+    #                     #  ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/roberta-1/qqp.jsonlist',
+    #                  './data/roberta-1/qqp-acc-cos.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'cos, 00-05', 'legend_order': 3},
+    #                      ('cos', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'cos, 06-11', 'legend_order': 4},
+    #                      ('cos', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'cos, 12-17', 'legend_order': 5},
+    #                      ('cos', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'cos, 18-23', 'legend_order': 6},
+    #                     #  ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                     #  ('cos', 'mean', ''): {'color': '#7f7f7f', 'legend_name': 'cos, total', 'legend_order': 7.5},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+
+    # pass
+    
+    # draw_ft2_metric3('./data/roberta-1/qqp.jsonlist',
+    #                  './data/roberta-1/qqp-acc-datainf.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-05', 'legend_order': 3},
+    #                      ('datainf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'datainf, 06-11', 'legend_order': 4},
+    #                      ('datainf', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'datainf, 12-17', 'legend_order': 5},
+    #                      ('datainf', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'datainf, 18-23', 'legend_order': 6},
+    #                     #  ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+
+    # pass     
+
+    # draw_ft2_metric3('./data/roberta-1/qnli.jsonlist',
+    #                  './data/roberta-1/qnli-acc-hf.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'hf, 00-05', 'legend_order': 3},
+    #                      ('hf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'hf, 06-11', 'legend_order': 4},
+    #                      ('hf', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'hf, 12-17', 'legend_order': 5},
+    #                      ('hf', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'hf, 18-23', 'legend_order': 6},
+    #                     #  ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/roberta-1/qnli.jsonlist',
+    #                  './data/roberta-1/qnli-acc-cos.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'cos, 00-05', 'legend_order': 3},
+    #                      ('cos', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'cos, 06-11', 'legend_order': 4},
+    #                      ('cos', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'cos, 12-17', 'legend_order': 5},
+    #                      ('cos', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'cos, 18-23', 'legend_order': 6},
+    #                     #  ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+    
+    # draw_ft2_metric3('./data/roberta-1/qnli.jsonlist',
+    #                  './data/roberta-1/qnli-acc-datainf.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-05', 'legend_order': 3},
+    #                      ('datainf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'datainf, 06-11', 'legend_order': 4},
+    #                      ('datainf', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'datainf, 12-17', 'legend_order': 5},
+    #                      ('datainf', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'datainf, 18-23', 'legend_order': 6},
+    #                     #  ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+
+    # pass 
+
+    # draw_ft2_metric3('./data/roberta-1/mrpc.jsonlist',
+    #                  './data/roberta-1/mrpc-acc-hf.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'hf, 00-05', 'legend_order': 3},
+    #                      ('hf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'hf, 06-11', 'legend_order': 4},
+    #                      ('hf', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'hf, 12-17', 'legend_order': 5},
+    #                      ('hf', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'hf, 18-23', 'legend_order': 6},
+    #                     #  ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/roberta-1/mrpc.jsonlist',
+    #                  './data/roberta-1/mrpc-acc-cos.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'cos, 00-05', 'legend_order': 3},
+    #                      ('cos', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'cos, 06-11', 'legend_order': 4},
+    #                      ('cos', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'cos, 12-17', 'legend_order': 5},
+    #                      ('cos', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'cos, 18-23', 'legend_order': 6},
+    #                     #  ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+    
+    # draw_ft2_metric3('./data/roberta-1/mrpc.jsonlist',
+    #                  './data/roberta-1/mrpc-acc-datainf.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-05', 'legend_order': 3},
+    #                      ('datainf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'datainf, 06-11', 'legend_order': 4},
+    #                      ('datainf', 'mean', '12-17'): {'color': '#8c564b', 'legend_name': 'datainf, 12-17', 'legend_order': 5},
+    #                      ('datainf', 'mean', '18-23'): {'color': '#e377c2', 'legend_name': 'datainf, 18-23', 'legend_order': 6},
+    #                     #  ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+    
+    # pass
+
+
+    # draw_ft2_metric3('./data/llama/sst2.jsonlist',
+    #                  './data/llama/sst2-accd-hf.pdf', metric="infl_accuracy", draw_diff=True,
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'hf, 00-03', 'legend_order': 3},
+    #                      ('hf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'hf, 04-07', 'legend_order': 4},
+    #                      ('hf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'hf, 08-11', 'legend_order': 5},
+    #                      ('hf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'hf, 12-15', 'legend_order': 6},
+    #                      ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/llama/sst2.jsonlist',
+    #                  './data/llama/sst2-accd-cos.pdf', metric="infl_accuracy", draw_diff=True,
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'cos, 00-03', 'legend_order': 3},
+    #                      ('cos', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'cos, 04-07', 'legend_order': 4},
+    #                      ('cos', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'cos, 08-11', 'legend_order': 5},
+    #                      ('cos', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'cos, 12-15', 'legend_order': 6},
+    #                      ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+    
+    # draw_ft2_metric3('./data/llama/sst2.jsonlist',
+    #                  './data/llama/sst2-accd-datainf.pdf', metric="infl_accuracy", draw_diff=True,
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-03', 'legend_order': 3},
+    #                      ('datainf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'datainf, 04-07', 'legend_order': 4},
+    #                      ('datainf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'datainf, 08-11', 'legend_order': 5},
+    #                      ('datainf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'datainf, 12-15', 'legend_order': 6},
+    #                      ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+
+    # pass     
+
+    # draw_ft2_metric3('./data/llama/qqp.jsonlist',
+    #                  './data/llama/qqp-accd-hf.pdf', metric="infl_accuracy", draw_diff=True,
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'hf, 00-03', 'legend_order': 3},
+    #                      ('hf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'hf, 04-07', 'legend_order': 4},
+    #                      ('hf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'hf, 08-11', 'legend_order': 5},
+    #                      ('hf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'hf, 12-15', 'legend_order': 6},
+    #                      ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/llama/qqp.jsonlist',
+    #                  './data/llama/qqp-accd-cos.pdf', metric="infl_accuracy", draw_diff=True,
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'cos, 00-03', 'legend_order': 3},
+    #                      ('cos', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'cos, 04-07', 'legend_order': 4},
+    #                      ('cos', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'cos, 08-11', 'legend_order': 5},
+    #                      ('cos', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'cos, 12-15', 'legend_order': 6},
+    #                      ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                      ('cos', 'mean', ''): {'color': '#7f7f7f', 'legend_name': 'cos, total', 'legend_order': 7.5},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+
+    # pass
+    
+    # draw_ft2_metric3('./data/llama/qqp.jsonlist',
+    #                  './data/llama/qqp-accd-datainf.pdf', metric="infl_accuracy", draw_diff=True,
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-03', 'legend_order': 3},
+    #                      ('datainf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'datainf, 04-07', 'legend_order': 4},
+    #                      ('datainf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'datainf, 08-11', 'legend_order': 5},
+    #                      ('datainf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'datainf, 12-15', 'legend_order': 6},
+    #                      ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+
+    # pass     
+
+    # draw_ft2_metric3('./data/llama/qnli.jsonlist',
+    #                  './data/llama/qnli-accd-hf.pdf', metric="infl_accuracy", draw_diff=True,
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'hf, 00-03', 'legend_order': 3},
+    #                      ('hf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'hf, 04-07', 'legend_order': 4},
+    #                      ('hf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'hf, 08-11', 'legend_order': 5},
+    #                      ('hf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'hf, 12-15', 'legend_order': 6},
+    #                      ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/llama/qnli.jsonlist',
+    #                  './data/llama/qnli-accd-cos.pdf', metric="infl_accuracy", draw_diff=True,
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'cos, 00-03', 'legend_order': 3},
+    #                      ('cos', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'cos, 04-07', 'legend_order': 4},
+    #                      ('cos', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'cos, 08-11', 'legend_order': 5},
+    #                      ('cos', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'cos, 12-15', 'legend_order': 6},
+    #                      ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+    
+    # draw_ft2_metric3('./data/llama/qnli.jsonlist',
+    #                  './data/llama/qnli-accd-datainf.pdf', metric="infl_accuracy", draw_diff=True,
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-03', 'legend_order': 3},
+    #                      ('datainf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'datainf, 04-07', 'legend_order': 4},
+    #                      ('datainf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'datainf, 08-11', 'legend_order': 5},
+    #                      ('datainf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'datainf, 12-15', 'legend_order': 6},
+    #                      ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+
+    # pass 
+
+    # draw_ft2_metric3('./data/llama/mrpc.jsonlist', 
+    #                  './data/llama/mrpc-accd-hf.pdf', metric="infl_accuracy", draw_diff=True,
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'hf, 00-03', 'legend_order': 3},
+    #                      ('hf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'hf, 04-07', 'legend_order': 4},
+    #                      ('hf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'hf, 08-11', 'legend_order': 5},
+    #                      ('hf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'hf, 12-15', 'legend_order': 6},
+    #                      ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/llama/mrpc.jsonlist',
+    #                  './data/llama/mrpc-accd-cos.pdf', metric="infl_accuracy", draw_diff=True,
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'cos, 00-03', 'legend_order': 3},
+    #                      ('cos', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'cos, 04-07', 'legend_order': 4},
+    #                      ('cos', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'cos, 08-11', 'legend_order': 5},
+    #                      ('cos', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'cos, 12-15', 'legend_order': 6},
+    #                      ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+    
+    # draw_ft2_metric3('./data/llama/mrpc.jsonlist',
+    #                  './data/llama/mrpc-accd-datainf.pdf', metric="infl_accuracy", draw_diff=True,
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-03', 'legend_order': 3},
+    #                      ('datainf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'datainf, 04-07', 'legend_order': 4},
+    #                      ('datainf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'datainf, 08-11', 'legend_order': 5},
+    #                      ('datainf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'datainf, 12-15', 'legend_order': 6},
+    #                      ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+    
+    # pass
+
+
+    # draw_ft2_metric3('./data/llama/sst2.jsonlist',
+    #                  './data/llama/sst2-iacc-hf.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'hf, 00-03', 'legend_order': 3},
+    #                      ('hf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'hf, 04-07', 'legend_order': 4},
+    #                      ('hf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'hf, 08-11', 'legend_order': 5},
+    #                      ('hf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'hf, 12-15', 'legend_order': 6},
+    #                      ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/llama/sst2.jsonlist',
+    #                  './data/llama/sst2-iacc-cos.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'cos, 00-03', 'legend_order': 3},
+    #                      ('cos', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'cos, 04-07', 'legend_order': 4},
+    #                      ('cos', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'cos, 08-11', 'legend_order': 5},
+    #                      ('cos', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'cos, 12-15', 'legend_order': 6},
+    #                      ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+    
+    # draw_ft2_metric3('./data/llama/sst2.jsonlist',
+    #                  './data/llama/sst2-iacc-datainf.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-03', 'legend_order': 3},
+    #                      ('datainf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'datainf, 04-07', 'legend_order': 4},
+    #                      ('datainf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'datainf, 08-11', 'legend_order': 5},
+    #                      ('datainf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'datainf, 12-15', 'legend_order': 6},
+    #                      ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+
+    # pass     
+
+    # draw_ft2_metric3('./data/llama/qqp.jsonlist',
+    #                  './data/llama/qqp-iacc-hf.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'hf, 00-03', 'legend_order': 3},
+    #                      ('hf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'hf, 04-07', 'legend_order': 4},
+    #                      ('hf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'hf, 08-11', 'legend_order': 5},
+    #                      ('hf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'hf, 12-15', 'legend_order': 6},
+    #                      ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/llama/qqp.jsonlist',
+    #                  './data/llama/qqp-iacc-cos.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'cos, 00-03', 'legend_order': 3},
+    #                      ('cos', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'cos, 04-07', 'legend_order': 4},
+    #                      ('cos', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'cos, 08-11', 'legend_order': 5},
+    #                      ('cos', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'cos, 12-15', 'legend_order': 6},
+    #                      ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                      ('cos', 'mean', ''): {'color': '#7f7f7f', 'legend_name': 'cos, total', 'legend_order': 7.5},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+
+    # pass
+    
+    # draw_ft2_metric3('./data/llama/qqp.jsonlist',
+    #                  './data/llama/qqp-iacc-datainf.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-03', 'legend_order': 3},
+    #                      ('datainf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'datainf, 04-07', 'legend_order': 4},
+    #                      ('datainf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'datainf, 08-11', 'legend_order': 5},
+    #                      ('datainf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'datainf, 12-15', 'legend_order': 6},
+    #                      ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+
+    # pass     
+
+    # draw_ft2_metric3('./data/llama/qnli.jsonlist',
+    #                  './data/llama/qnli-iacc-hf.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'hf, 00-03', 'legend_order': 3},
+    #                      ('hf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'hf, 04-07', 'legend_order': 4},
+    #                      ('hf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'hf, 08-11', 'legend_order': 5},
+    #                      ('hf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'hf, 12-15', 'legend_order': 6},
+    #                      ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/llama/qnli.jsonlist',
+    #                  './data/llama/qnli-iacc-cos.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'cos, 00-03', 'legend_order': 3},
+    #                      ('cos', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'cos, 04-07', 'legend_order': 4},
+    #                      ('cos', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'cos, 08-11', 'legend_order': 5},
+    #                      ('cos', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'cos, 12-15', 'legend_order': 6},
+    #                      ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+    
+    # draw_ft2_metric3('./data/llama/qnli.jsonlist',
+    #                  './data/llama/qnli-iacc-datainf.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-03', 'legend_order': 3},
+    #                      ('datainf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'datainf, 04-07', 'legend_order': 4},
+    #                      ('datainf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'datainf, 08-11', 'legend_order': 5},
+    #                      ('datainf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'datainf, 12-15', 'legend_order': 6},
+    #                      ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+
+    # pass 
+
+    # draw_ft2_metric3('./data/llama/mrpc.jsonlist',
+    #                  './data/llama/mrpc-iacc-hf.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'hf, 00-03', 'legend_order': 3},
+    #                      ('hf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'hf, 04-07', 'legend_order': 4},
+    #                      ('hf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'hf, 08-11', 'legend_order': 5},
+    #                      ('hf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'hf, 12-15', 'legend_order': 6},
+    #                      ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/llama/mrpc.jsonlist',
+    #                  './data/llama/mrpc-iacc-cos.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'cos, 00-03', 'legend_order': 3},
+    #                      ('cos', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'cos, 04-07', 'legend_order': 4},
+    #                      ('cos', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'cos, 08-11', 'legend_order': 5},
+    #                      ('cos', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'cos, 12-15', 'legend_order': 6},
+    #                      ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+    
+    # draw_ft2_metric3('./data/llama/mrpc.jsonlist',
+    #                  './data/llama/mrpc-iacc-datainf.pdf', metric="infl_accuracy",
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-03', 'legend_order': 3},
+    #                      ('datainf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'datainf, 04-07', 'legend_order': 4},
+    #                      ('datainf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'datainf, 08-11', 'legend_order': 5},
+    #                      ('datainf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'datainf, 12-15', 'legend_order': 6},
+    #                      ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+    
+    # pass
+
+
+    # base_path = './data/llama'
+    # tasks = ['qnli', 'mrpc', 'sst2', 'qqp']
+
+    # module_groups_regex = { "WE": ".*\\.embed_tokens\\..*",     
+    #                         "00-03": ".*\\.layers\\.([0-3])\\..*\\.lora_(A|B)\\..*",
+    #                         "04-07": ".*\\.layers\\.([4-7])\\..*\\.lora_(A|B)\\..*",
+    #                         "08-11": ".*\\.layers\\.([8-9]|1[0-1])\\..*\\.lora_(A|B)\\..*",
+    #                         "12-15": ".*\\.layers\\.(1[2-5])\\..*\\.lora_(A|B)\\..*",
+
+    #                         "00-03 A": ".*\\.layers\\.([0-3])\\..*\\.lora_A\\..*",
+    #                         "04-07 A": ".*\\.layers\\.([4-7])\\..*\\.lora_A\\..*",
+    #                         "08-11 A": ".*\\.layers\\.([8-9]|1[0-1])\\..*\\.lora_A\\..*",
+    #                         "12-15 A": ".*\\.layers\\.(1[2-5])\\..*\\.lora_A\\..*",
+                            
+    #                         "00-03 B": ".*\\.layers\\.([0-3])\\..*\\.lora_B\\..*",
+    #                         "04-07 B": ".*\\.layers\\.([4-7])\\..*\\.lora_B\\..*",
+    #                         "08-11 B": ".*\\.layers\\.([8-9]|1[0-1])\\..*\\.lora_B\\..*",
+    #                         "12-15 B": ".*\\.layers\\.(1[2-5])\\..*\\.lora_B\\..*",
+    #                         "CL": ".*\\.score\\..*"
+    #                      }
+
+    # infl_methods = [
+    #     'hf',
+    #     'cos',
+    #     'datainf',
+    #     'hf_we_', 
+    #     'hf_we_topk_10',
+    # ]
+    # agg_methods = {
+    #     "rank": rank_matrix_score, 
+    #     "mean": mean_matrix_score, 
+    #     "mean_10": partial(mean_matrix_score, trim_ratio=0.1),
+    #     "mean_50": partial(mean_matrix_score, trim_ratio=0.5),
+    #     "dir": dir_matrix_score,
+    # }
+    # for task in tasks:
+    #     df = compute_ndr_metrics_table(base_path, task=task,
+    #                                     module_groups_regex = module_groups_regex,
+    #                                     agg_methods=agg_methods,
+    #                                     infl_methods = infl_methods)
+    #     print(df)
+    #     pass 
+    #     output_table(df, base_path, task)
+    #     pass
+
+    # pass
+        
+
+    # draw_ft2_metric3('./data/llama/sst2.jsonlist',
+    #                  './data/llama/sst2-acc-hf.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'hf, 00-03', 'legend_order': 3},
+    #                      ('hf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'hf, 04-07', 'legend_order': 4},
+    #                      ('hf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'hf, 08-11', 'legend_order': 5},
+    #                      ('hf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'hf, 12-15', 'legend_order': 6},
+    #                      ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/llama/sst2.jsonlist',
+    #                  './data/llama/sst2-acc-cos.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'cos, 00-03', 'legend_order': 3},
+    #                      ('cos', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'cos, 04-07', 'legend_order': 4},
+    #                      ('cos', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'cos, 08-11', 'legend_order': 5},
+    #                      ('cos', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'cos, 12-15', 'legend_order': 6},
+    #                      ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+    
+    # draw_ft2_metric3('./data/llama/sst2.jsonlist',
+    #                  './data/llama/sst2-acc-datainf.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-03', 'legend_order': 3},
+    #                      ('datainf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'datainf, 04-07', 'legend_order': 4},
+    #                      ('datainf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'datainf, 08-11', 'legend_order': 5},
+    #                      ('datainf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'datainf, 12-15', 'legend_order': 6},
+    #                      ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+
+    # pass     
+
+    # draw_ft2_metric3('./data/llama/qqp.jsonlist',
+    #                  './data/llama/qqp-acc-hf.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'hf, 00-03', 'legend_order': 3},
+    #                      ('hf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'hf, 04-07', 'legend_order': 4},
+    #                      ('hf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'hf, 08-11', 'legend_order': 5},
+    #                      ('hf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'hf, 12-15', 'legend_order': 6},
+    #                      ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/llama/qqp.jsonlist',
+    #                  './data/llama/qqp-acc-cos.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'cos, 00-03', 'legend_order': 3},
+    #                      ('cos', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'cos, 04-07', 'legend_order': 4},
+    #                      ('cos', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'cos, 08-11', 'legend_order': 5},
+    #                      ('cos', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'cos, 12-15', 'legend_order': 6},
+    #                      ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                      ('cos', 'mean', ''): {'color': '#7f7f7f', 'legend_name': 'cos, total', 'legend_order': 7.5},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+
+    # pass
+    
+    # draw_ft2_metric3('./data/llama/qqp.jsonlist',
+    #                  './data/llama/qqp-acc-datainf.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-03', 'legend_order': 3},
+    #                      ('datainf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'datainf, 04-07', 'legend_order': 4},
+    #                      ('datainf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'datainf, 08-11', 'legend_order': 5},
+    #                      ('datainf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'datainf, 12-15', 'legend_order': 6},
+    #                      ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+
+    # pass     
+
+    # draw_ft2_metric3('./data/llama/qnli.jsonlist',
+    #                  './data/llama/qnli-acc-hf.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'hf, 00-03', 'legend_order': 3},
+    #                      ('hf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'hf, 04-07', 'legend_order': 4},
+    #                      ('hf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'hf, 08-11', 'legend_order': 5},
+    #                      ('hf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'hf, 12-15', 'legend_order': 6},
+    #                      ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/llama/qnli.jsonlist',
+    #                  './data/llama/qnli-acc-cos.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'cos, 00-03', 'legend_order': 3},
+    #                      ('cos', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'cos, 04-07', 'legend_order': 4},
+    #                      ('cos', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'cos, 08-11', 'legend_order': 5},
+    #                      ('cos', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'cos, 12-15', 'legend_order': 6},
+    #                      ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+    
+    # draw_ft2_metric3('./data/llama/qnli.jsonlist',
+    #                  './data/llama/qnli-acc-datainf.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-03', 'legend_order': 3},
+    #                      ('datainf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'datainf, 04-07', 'legend_order': 4},
+    #                      ('datainf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'datainf, 08-11', 'legend_order': 5},
+    #                      ('datainf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'datainf, 12-15', 'legend_order': 6},
+    #                      ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+
+    # pass 
+
+    # draw_ft2_metric3('./data/llama/mrpc.jsonlist',
+    #                  './data/llama/mrpc-acc-hf.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                      ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                      ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('hf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'hf, WE', 'legend_order': 2},
+    #                      ('hf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'hf, 00-03', 'legend_order': 3},
+    #                      ('hf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'hf, 04-07', 'legend_order': 4},
+    #                      ('hf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'hf, 08-11', 'legend_order': 5},
+    #                      ('hf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'hf, 12-15', 'legend_order': 6},
+    #                      ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })
+
+    # draw_ft2_metric3('./data/llama/mrpc.jsonlist',
+    #                  './data/llama/mrpc-acc-cos.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('cos', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'cos, WE', 'legend_order': 2},
+    #                      ('cos', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'cos, 00-03', 'legend_order': 3},
+    #                      ('cos', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'cos, 04-07', 'legend_order': 4},
+    #                      ('cos', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'cos, 08-11', 'legend_order': 5},
+    #                      ('cos', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'cos, 12-15', 'legend_order': 6},
+    #                      ('cos', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'cos, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })    
+    
+    # draw_ft2_metric3('./data/llama/mrpc.jsonlist',
+    #                  './data/llama/mrpc-acc-datainf.pdf',
+    #                  method_dict={
+    #                      ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': -1},
+    #                     #  ('hf_we_', 'mean', 'WE'): {'color': '#1f77b4', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #                     #  ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$_{we}^{10}$', 'legend_order': 1},
+    #                      ('datainf', 'mean', 'WE'): {'color': '#ff7f0e', 'legend_name': 'datainf, WE', 'legend_order': 2},
+    #                      ('datainf', 'mean', '00-03'): {'color': '#2ca02c', 'legend_name': 'datainf, 00-03', 'legend_order': 3},
+    #                      ('datainf', 'mean', '04-07'): {'color': '#d62728', 'legend_name': 'datainf, 04-07', 'legend_order': 4},
+    #                      ('datainf', 'mean', '08-11'): {'color': '#8c564b', 'legend_name': 'datainf, 08-11', 'legend_order': 5},
+    #                      ('datainf', 'mean', '12-15'): {'color': '#e377c2', 'legend_name': 'datainf, 12-15', 'legend_order': 6},
+    #                      ('datainf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'datainf, CL', 'legend_order': 7},
+    #                      ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': 8},
+    #                  })        
+    
+    # pass
 
     # compute_noise_detection_metrics_per_sample('./data/roberta/qnli', 
     #                                 plot_title = "QNLI on Roberta-large with WE",
@@ -1430,8 +2699,8 @@ if __name__ == "__main__":
     #                                 out_chart_file="./data/roberta/postprocess/qqp/best_modules_per_sample.pdf")
 
 
-    base_path = './data/roberta'
-    tasks = ['qnli', 'mrpc', 'sst2', 'qqp']
+    # base_path = './data/roberta'
+    # tasks = ['qnli', 'mrpc', 'sst2', 'qqp']
 
     # module_groups_regex = { "WE": ".*\\.word_embeddings\\..*",
                             
@@ -1589,228 +2858,228 @@ if __name__ == "__main__":
     #                     colors=colors, legend_order = legend_order, legend_names = legend_names)
 
 
-    infl_vs_module_filter = [("datainf", "12-17 A"), ("hf", "12-17"), ("cos", "18-23 B"), ("hf_we_", "WE"), ("hf_we_topk_10", "WE")]
-    module_groups_regex = { "WE": ".*\\.word_embeddings\\..*",
+    # infl_vs_module_filter = [("datainf", "12-17 A"), ("hf", "12-17"), ("cos", "18-23 B"), ("hf_we_", "WE"), ("hf_we_topk_10", "WE")]
+    # module_groups_regex = { "WE": ".*\\.word_embeddings\\..*",
                             
-                            "00-05": ".*\\.layer\\.([0-5])\\..*\\.lora_(A|B)\\..*",
-                            "06-11": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_(A|B)\\..*",
-                            "12-17": ".*\\.layer\\.(1[2-7])\\..*\\.lora_(A|B)\\..*",
-                            "18-23": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_(A|B)\\..*",
+    #                         "00-05": ".*\\.layer\\.([0-5])\\..*\\.lora_(A|B)\\..*",
+    #                         "06-11": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_(A|B)\\..*",
+    #                         "12-17": ".*\\.layer\\.(1[2-7])\\..*\\.lora_(A|B)\\..*",
+    #                         "18-23": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_(A|B)\\..*",
 
-                            "00-05 A": ".*\\.layer\\.([0-5])\\..*\\.lora_A\\..*",
-                            "06-11 A": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_A\\..*",
-                            "12-17 A": ".*\\.layer\\.(1[2-7])\\..*\\.lora_A\\..*",
-                            "18-23 A": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_A\\..*",
+    #                         "00-05 A": ".*\\.layer\\.([0-5])\\..*\\.lora_A\\..*",
+    #                         "06-11 A": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_A\\..*",
+    #                         "12-17 A": ".*\\.layer\\.(1[2-7])\\..*\\.lora_A\\..*",
+    #                         "18-23 A": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_A\\..*",
 
-                            "00-05 B": ".*\\.layer\\.([0-5])\\..*\\.lora_B\\..*",
-                            "06-11 B": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_B\\..*",
-                            "12-17 B": ".*\\.layer\\.(1[2-7])\\..*\\.lora_B\\..*",
-                            "18-23 B": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_B\\..*",                            
+    #                         "00-05 B": ".*\\.layer\\.([0-5])\\..*\\.lora_B\\..*",
+    #                         "06-11 B": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_B\\..*",
+    #                         "12-17 B": ".*\\.layer\\.(1[2-7])\\..*\\.lora_B\\..*",
+    #                         "18-23 B": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_B\\..*",                            
 
-                            "CL": ".*\\.classifier\\..*",
-                         }
+    #                         "CL": ".*\\.classifier\\..*",
+    #                      }
     
-    colors = {
-        "hf_we_, WE": '#1f77b4',
-        "hf_we_topk_10, WE": '#7f7f7f',
-        # "hf, WE": "#ff7f0e",
-        "hf, 12-17": "#2ca02c",
-        "cos, 18-23 B": "#ff7f0e",
-        # "hf, 12-17 B": "#d62728",
-        # "hf, 18-23 A": "#8c564b",
-        # "hf, 18-23 B": "#e377c2",
-        # "hf, CL": "#9467bd",
-        "datainf, 12-17 A":"#9467bd",
-        # '#bcbd22', '#17becf'
-    }
+    # colors = {
+    #     "hf_we_, WE": '#1f77b4',
+    #     "hf_we_topk_10, WE": '#7f7f7f',
+    #     # "hf, WE": "#ff7f0e",
+    #     "hf, 12-17": "#2ca02c",
+    #     "cos, 18-23 B": "#ff7f0e",
+    #     # "hf, 12-17 B": "#d62728",
+    #     # "hf, 18-23 A": "#8c564b",
+    #     # "hf, 18-23 B": "#e377c2",
+    #     # "hf, CL": "#9467bd",
+    #     "datainf, 12-17 A":"#9467bd",
+    #     # '#bcbd22', '#17becf'
+    # }
 
-    legend_order = {
-        "hf_we_, WE": 0,
-        "hf_we_topk_10, WE": 1,
-        "datainf, 12-17 A": 2,
-        "hf, 12-17": 3,
-        "cos, 18-23 B": 4,
-    }
-    legend_names = {
-        "hf_we_, WE": "hf$_{we}$",
-        "hf_we_topk_10, WE": "hf$_{we}^{10}$"
-    }
-    tasks = ['mrpc']
-    module_groups_regex_rev = {v:k for k,v in module_groups_regex.items()}
-    for d in tasks:
-        draw_ft2_metric2(d, infile = f'./data/roberta/{d}/metrics.jsonlist', outfile = f'./data/roberta/{d}/postprocess/T-acc-hf-top.pdf',
-                        metric = 'accuracy', module_pattern_to_name = module_groups_regex_rev,
-                        colors=colors, legend_order = legend_order, legend_names = legend_names,
-                        infl_vs_module_filter = infl_vs_module_filter)
+    # legend_order = {
+    #     "hf_we_, WE": 0,
+    #     "hf_we_topk_10, WE": 1,
+    #     "datainf, 12-17 A": 2,
+    #     "hf, 12-17": 3,
+    #     "cos, 18-23 B": 4,
+    # }
+    # legend_names = {
+    #     "hf_we_, WE": "hf$_{we}$",
+    #     "hf_we_topk_10, WE": "hf$_{we}^{10}$"
+    # }
+    # tasks = ['mrpc']
+    # module_groups_regex_rev = {v:k for k,v in module_groups_regex.items()}
+    # for d in tasks:
+    #     draw_ft2_metric2(d, infile = f'./data/roberta/{d}/metrics.jsonlist', outfile = f'./data/roberta/{d}/postprocess/T-acc-hf-top.pdf',
+    #                     metric = 'accuracy', module_pattern_to_name = module_groups_regex_rev,
+    #                     colors=colors, legend_order = legend_order, legend_names = legend_names,
+    #                     infl_vs_module_filter = infl_vs_module_filter)
         
-    pass
+    # pass
 
-    infl_vs_module_filter = [("cos", ""), ("datainf", "18-23 B"), ("hf", "18-23 B"), ("hf_we_", "WE"), ("hf_we_topk_10", "WE")]
-    module_groups_regex = { "WE": ".*\\.word_embeddings\\..*",
+    # infl_vs_module_filter = [("cos", ""), ("datainf", "18-23 B"), ("hf", "18-23 B"), ("hf_we_", "WE"), ("hf_we_topk_10", "WE")]
+    # module_groups_regex = { "WE": ".*\\.word_embeddings\\..*",
                             
-                            "00-05": ".*\\.layer\\.([0-5])\\..*\\.lora_(A|B)\\..*",
-                            "06-11": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_(A|B)\\..*",
-                            "12-17": ".*\\.layer\\.(1[2-7])\\..*\\.lora_(A|B)\\..*",
-                            "18-23": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_(A|B)\\..*",
+    #                         "00-05": ".*\\.layer\\.([0-5])\\..*\\.lora_(A|B)\\..*",
+    #                         "06-11": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_(A|B)\\..*",
+    #                         "12-17": ".*\\.layer\\.(1[2-7])\\..*\\.lora_(A|B)\\..*",
+    #                         "18-23": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_(A|B)\\..*",
 
-                            "00-05 A": ".*\\.layer\\.([0-5])\\..*\\.lora_A\\..*",
-                            "06-11 A": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_A\\..*",
-                            "12-17 A": ".*\\.layer\\.(1[2-7])\\..*\\.lora_A\\..*",
-                            "18-23 A": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_A\\..*",
+    #                         "00-05 A": ".*\\.layer\\.([0-5])\\..*\\.lora_A\\..*",
+    #                         "06-11 A": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_A\\..*",
+    #                         "12-17 A": ".*\\.layer\\.(1[2-7])\\..*\\.lora_A\\..*",
+    #                         "18-23 A": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_A\\..*",
 
-                            "00-05 B": ".*\\.layer\\.([0-5])\\..*\\.lora_B\\..*",
-                            "06-11 B": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_B\\..*",
-                            "12-17 B": ".*\\.layer\\.(1[2-7])\\..*\\.lora_B\\..*",
-                            "18-23 B": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_B\\..*",                            
+    #                         "00-05 B": ".*\\.layer\\.([0-5])\\..*\\.lora_B\\..*",
+    #                         "06-11 B": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_B\\..*",
+    #                         "12-17 B": ".*\\.layer\\.(1[2-7])\\..*\\.lora_B\\..*",
+    #                         "18-23 B": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_B\\..*",                            
 
-                            "CL": ".*\\.classifier\\..*",
-                         }
+    #                         "CL": ".*\\.classifier\\..*",
+    #                      }
     
-    colors = {
-        "hf_we_, WE": '#1f77b4',
-        "hf_we_topk_10, WE": '#7f7f7f',
-        "hf, 18-23 B": "#2ca02c",
-        "datainf, 18-23 B":"#9467bd",
-        "cos": "#ff7f0e",
-        # "hf, 12-17 B": "#d62728",
-        # "hf, 18-23 A": "#8c564b",
-        # "hf, 18-23 B": "#e377c2",
-        # "hf, CL": "#9467bd",
-        # '#bcbd22', '#17becf'
-    }
+    # colors = {
+    #     "hf_we_, WE": '#1f77b4',
+    #     "hf_we_topk_10, WE": '#7f7f7f',
+    #     "hf, 18-23 B": "#2ca02c",
+    #     "datainf, 18-23 B":"#9467bd",
+    #     "cos": "#ff7f0e",
+    #     # "hf, 12-17 B": "#d62728",
+    #     # "hf, 18-23 A": "#8c564b",
+    #     # "hf, 18-23 B": "#e377c2",
+    #     # "hf, CL": "#9467bd",
+    #     # '#bcbd22', '#17becf'
+    # }
 
-    legend_order = {
-        "hf_we_, WE": 0,
-        "hf_we_topk_10, WE": 1,
-        "hf, 18-23 B": 2,
-        "datainf, 18-23 B": 3,
-        "cos": 4,
-    }
-    legend_names = {
-        "hf_we_, WE": "hf$_{we}$",
-        "hf_we_topk_10, WE": "hf$_{we}^{10}$"
-    }
-    tasks = ['qnli']
-    module_groups_regex_rev = {v:k for k,v in module_groups_regex.items()}
-    for d in tasks:
-        draw_ft2_metric2(d, infile = f'./data/roberta/{d}/metrics.jsonlist', outfile = f'./data/roberta/{d}/postprocess/T-acc-hf-top.pdf',
-                        metric = 'accuracy', module_pattern_to_name = module_groups_regex_rev,
-                        colors=colors, legend_order = legend_order, legend_names = legend_names,
-                        infl_vs_module_filter = infl_vs_module_filter)
+    # legend_order = {
+    #     "hf_we_, WE": 0,
+    #     "hf_we_topk_10, WE": 1,
+    #     "hf, 18-23 B": 2,
+    #     "datainf, 18-23 B": 3,
+    #     "cos": 4,
+    # }
+    # legend_names = {
+    #     "hf_we_, WE": "hf$_{we}$",
+    #     "hf_we_topk_10, WE": "hf$_{we}^{10}$"
+    # }
+    # tasks = ['qnli']
+    # module_groups_regex_rev = {v:k for k,v in module_groups_regex.items()}
+    # for d in tasks:
+    #     draw_ft2_metric2(d, infile = f'./data/roberta/{d}/metrics.jsonlist', outfile = f'./data/roberta/{d}/postprocess/T-acc-hf-top.pdf',
+    #                     metric = 'accuracy', module_pattern_to_name = module_groups_regex_rev,
+    #                     colors=colors, legend_order = legend_order, legend_names = legend_names,
+    #                     infl_vs_module_filter = infl_vs_module_filter)
         
-    pass    
+    # pass    
 
-    infl_vs_module_filter = [("datainf", "18-23 A"), ("cos", "18-23 B"), ("hf", "CL"), ("hf_we_", "WE"), ("hf_we_topk_10", "WE")]
-    module_groups_regex = { "WE": ".*\\.word_embeddings\\..*",
+    # infl_vs_module_filter = [("datainf", "18-23 A"), ("cos", "18-23 B"), ("hf", "CL"), ("hf_we_", "WE"), ("hf_we_topk_10", "WE")]
+    # module_groups_regex = { "WE": ".*\\.word_embeddings\\..*",
                             
-                            "00-05": ".*\\.layer\\.([0-5])\\..*\\.lora_(A|B)\\..*",
-                            "06-11": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_(A|B)\\..*",
-                            "12-17": ".*\\.layer\\.(1[2-7])\\..*\\.lora_(A|B)\\..*",
-                            "18-23": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_(A|B)\\..*",
+    #                         "00-05": ".*\\.layer\\.([0-5])\\..*\\.lora_(A|B)\\..*",
+    #                         "06-11": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_(A|B)\\..*",
+    #                         "12-17": ".*\\.layer\\.(1[2-7])\\..*\\.lora_(A|B)\\..*",
+    #                         "18-23": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_(A|B)\\..*",
 
-                            "00-05 A": ".*\\.layer\\.([0-5])\\..*\\.lora_A\\..*",
-                            "06-11 A": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_A\\..*",
-                            "12-17 A": ".*\\.layer\\.(1[2-7])\\..*\\.lora_A\\..*",
-                            "18-23 A": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_A\\..*",
+    #                         "00-05 A": ".*\\.layer\\.([0-5])\\..*\\.lora_A\\..*",
+    #                         "06-11 A": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_A\\..*",
+    #                         "12-17 A": ".*\\.layer\\.(1[2-7])\\..*\\.lora_A\\..*",
+    #                         "18-23 A": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_A\\..*",
 
-                            "00-05 B": ".*\\.layer\\.([0-5])\\..*\\.lora_B\\..*",
-                            "06-11 B": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_B\\..*",
-                            "12-17 B": ".*\\.layer\\.(1[2-7])\\..*\\.lora_B\\..*",
-                            "18-23 B": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_B\\..*",                            
+    #                         "00-05 B": ".*\\.layer\\.([0-5])\\..*\\.lora_B\\..*",
+    #                         "06-11 B": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_B\\..*",
+    #                         "12-17 B": ".*\\.layer\\.(1[2-7])\\..*\\.lora_B\\..*",
+    #                         "18-23 B": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_B\\..*",                            
 
-                            "CL": ".*\\.classifier\\..*",
-                         }
+    #                         "CL": ".*\\.classifier\\..*",
+    #                      }
     
-    colors = {
-        "hf_we_, WE": '#1f77b4',
-        "hf_we_topk_10, WE": '#7f7f7f',
-        # "hf, WE": "#ff7f0e",
-        "hf, CL": "#2ca02c",
-        "cos, 18-23 B": "#ff7f0e",
-        # "hf, 12-17 B": "#d62728",
-        # "hf, 18-23 A": "#8c564b",
-        # "hf, 18-23 B": "#e377c2",
-        # "hf, CL": "#9467bd",
-        "datainf, 18-23 A":"#9467bd",
-        # '#bcbd22', '#17becf'
-    }
+    # colors = {
+    #     "hf_we_, WE": '#1f77b4',
+    #     "hf_we_topk_10, WE": '#7f7f7f',
+    #     # "hf, WE": "#ff7f0e",
+    #     "hf, CL": "#2ca02c",
+    #     "cos, 18-23 B": "#ff7f0e",
+    #     # "hf, 12-17 B": "#d62728",
+    #     # "hf, 18-23 A": "#8c564b",
+    #     # "hf, 18-23 B": "#e377c2",
+    #     # "hf, CL": "#9467bd",
+    #     "datainf, 18-23 A":"#9467bd",
+    #     # '#bcbd22', '#17becf'
+    # }
 
-    legend_order = {
-        "hf_we_, WE": 0,
-        "hf_we_topk_10, WE": 1,
-        "datainf, 18-23 A": 2,
-        "cos, 18-23 B": 3,
-        "hf, CL": 4,
-    }
-    legend_names = {
-        "hf_we_, WE": "hf$_{we}$",
-        "hf_we_topk_10, WE": "hf$_{we}^{10}$"
-    }
-    tasks = ['qqp']
-    module_groups_regex_rev = {v:k for k,v in module_groups_regex.items()}
-    for d in tasks:
-        draw_ft2_metric2(d, infile = f'./data/roberta/{d}/metrics.jsonlist', outfile = f'./data/roberta/{d}/postprocess/T-acc-hf-top.pdf',
-                        metric = 'accuracy', module_pattern_to_name = module_groups_regex_rev,
-                        colors=colors, legend_order = legend_order, legend_names = legend_names,
-                        infl_vs_module_filter = infl_vs_module_filter)
+    # legend_order = {
+    #     "hf_we_, WE": 0,
+    #     "hf_we_topk_10, WE": 1,
+    #     "datainf, 18-23 A": 2,
+    #     "cos, 18-23 B": 3,
+    #     "hf, CL": 4,
+    # }
+    # legend_names = {
+    #     "hf_we_, WE": "hf$_{we}$",
+    #     "hf_we_topk_10, WE": "hf$_{we}^{10}$"
+    # }
+    # tasks = ['qqp']
+    # module_groups_regex_rev = {v:k for k,v in module_groups_regex.items()}
+    # for d in tasks:
+    #     draw_ft2_metric2(d, infile = f'./data/roberta/{d}/metrics.jsonlist', outfile = f'./data/roberta/{d}/postprocess/T-acc-hf-top.pdf',
+    #                     metric = 'accuracy', module_pattern_to_name = module_groups_regex_rev,
+    #                     colors=colors, legend_order = legend_order, legend_names = legend_names,
+    #                     infl_vs_module_filter = infl_vs_module_filter)
         
-    pass    
+    # pass    
 
-    infl_vs_module_filter = [("cos", "18-23 B"), ("datainf", "18-23 B"), ("hf", "18-23 B"), ("hf_we_", "WE"), ("hf_we_topk_10", "WE")]
-    module_groups_regex = { "WE": ".*\\.word_embeddings\\..*",
+    # infl_vs_module_filter = [("cos", "18-23 B"), ("datainf", "18-23 B"), ("hf", "18-23 B"), ("hf_we_", "WE"), ("hf_we_topk_10", "WE")]
+    # module_groups_regex = { "WE": ".*\\.word_embeddings\\..*",
                             
-                            "00-05": ".*\\.layer\\.([0-5])\\..*\\.lora_(A|B)\\..*",
-                            "06-11": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_(A|B)\\..*",
-                            "12-17": ".*\\.layer\\.(1[2-7])\\..*\\.lora_(A|B)\\..*",
-                            "18-23": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_(A|B)\\..*",
+    #                         "00-05": ".*\\.layer\\.([0-5])\\..*\\.lora_(A|B)\\..*",
+    #                         "06-11": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_(A|B)\\..*",
+    #                         "12-17": ".*\\.layer\\.(1[2-7])\\..*\\.lora_(A|B)\\..*",
+    #                         "18-23": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_(A|B)\\..*",
 
-                            "00-05 A": ".*\\.layer\\.([0-5])\\..*\\.lora_A\\..*",
-                            "06-11 A": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_A\\..*",
-                            "12-17 A": ".*\\.layer\\.(1[2-7])\\..*\\.lora_A\\..*",
-                            "18-23 A": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_A\\..*",
+    #                         "00-05 A": ".*\\.layer\\.([0-5])\\..*\\.lora_A\\..*",
+    #                         "06-11 A": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_A\\..*",
+    #                         "12-17 A": ".*\\.layer\\.(1[2-7])\\..*\\.lora_A\\..*",
+    #                         "18-23 A": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_A\\..*",
 
-                            "00-05 B": ".*\\.layer\\.([0-5])\\..*\\.lora_B\\..*",
-                            "06-11 B": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_B\\..*",
-                            "12-17 B": ".*\\.layer\\.(1[2-7])\\..*\\.lora_B\\..*",
-                            "18-23 B": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_B\\..*",                            
+    #                         "00-05 B": ".*\\.layer\\.([0-5])\\..*\\.lora_B\\..*",
+    #                         "06-11 B": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_B\\..*",
+    #                         "12-17 B": ".*\\.layer\\.(1[2-7])\\..*\\.lora_B\\..*",
+    #                         "18-23 B": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_B\\..*",                            
 
-                            "CL": ".*\\.classifier\\..*",
-                         }
+    #                         "CL": ".*\\.classifier\\..*",
+    #                      }
     
-    colors = {
-        "hf_we_, WE": '#1f77b4',
-        "hf_we_topk_10, WE": '#7f7f7f',
-        # "hf, WE": "#ff7f0e",
-        "hf, 18-23 B": "#2ca02c",
-        "cos, 18-23 B": "#ff7f0e",
-        # "hf, 12-17 B": "#d62728",
-        # "hf, 18-23 A": "#8c564b",
-        # "hf, 18-23 B": "#e377c2",
-        # "hf, CL": "#9467bd",
-        "datainf, 18-23 B":"#9467bd",
-        # '#bcbd22', '#17becf'
-    }
+    # colors = {
+    #     "hf_we_, WE": '#1f77b4',
+    #     "hf_we_topk_10, WE": '#7f7f7f',
+    #     # "hf, WE": "#ff7f0e",
+    #     "hf, 18-23 B": "#2ca02c",
+    #     "cos, 18-23 B": "#ff7f0e",
+    #     # "hf, 12-17 B": "#d62728",
+    #     # "hf, 18-23 A": "#8c564b",
+    #     # "hf, 18-23 B": "#e377c2",
+    #     # "hf, CL": "#9467bd",
+    #     "datainf, 18-23 B":"#9467bd",
+    #     # '#bcbd22', '#17becf'
+    # }
 
-    legend_order = {
-        "hf_we_, WE": 0,
-        "hf_we_topk_10, WE": 1,
-        "hf, 18-23 B": 3,
-        "datainf, 18-23 B": 4,
-        "cos, 18-23 B": 5,
-    }
-    legend_names = {
-        "hf_we_, WE": "hf$_{we}$",
-        "hf_we_topk_10, WE": "hf$_{we}^{10}$"
-    }
-    tasks = ['sst2']
-    module_groups_regex_rev = {v:k for k,v in module_groups_regex.items()}
-    for d in tasks:
-        draw_ft2_metric2(d, infile = f'./data/roberta/{d}/metrics.jsonlist', outfile = f'./data/roberta/{d}/postprocess/T-acc-hf-top.pdf',
-                        metric = 'accuracy', module_pattern_to_name = module_groups_regex_rev,
-                        colors=colors, legend_order = legend_order, legend_names = legend_names,
-                        infl_vs_module_filter = infl_vs_module_filter)
+    # legend_order = {
+    #     "hf_we_, WE": 0,
+    #     "hf_we_topk_10, WE": 1,
+    #     "hf, 18-23 B": 3,
+    #     "datainf, 18-23 B": 4,
+    #     "cos, 18-23 B": 5,
+    # }
+    # legend_names = {
+    #     "hf_we_, WE": "hf$_{we}$",
+    #     "hf_we_topk_10, WE": "hf$_{we}^{10}$"
+    # }
+    # tasks = ['sst2']
+    # module_groups_regex_rev = {v:k for k,v in module_groups_regex.items()}
+    # for d in tasks:
+    #     draw_ft2_metric2(d, infile = f'./data/roberta/{d}/metrics.jsonlist', outfile = f'./data/roberta/{d}/postprocess/T-acc-hf-top.pdf',
+    #                     metric = 'accuracy', module_pattern_to_name = module_groups_regex_rev,
+    #                     colors=colors, legend_order = legend_order, legend_names = legend_names,
+    #                     infl_vs_module_filter = infl_vs_module_filter)
         
-    pass        
+    # pass        
 
     #------------------------------------------------------------------------
     # OLD code from here
