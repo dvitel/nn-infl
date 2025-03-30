@@ -262,6 +262,7 @@ def finetune(task = 'mrpc', low_rank = 4,
 
     # lora_model.save_pretrained(model_path)
     tokenizer.save_pretrained(best_model_path)
+    tokenizer.save_pretrained(best_loss_model_path)
     tokenizer.save_pretrained(last_model_path)
 
     del lora_model, train_dataloader, eval_dataloader
@@ -995,11 +996,12 @@ def finetune2(task = 'qnli',
         config = json.load(file)    
     scores_path = os.path.join(cwd, f'{s_prefix}_{seed}.pt')
     best_model_path = os.path.join(cwd, f'{m_prefix}_2_b_{task}_{seed}')
+    best_loss_model_path = os.path.join(cwd, f'{m_prefix}_2_bl_{task}_{seed}')
     last_model_path = os.path.join(cwd, f'{m_prefix}_2_l_{task}_{seed}')
     finetune2_config=dict(task = task, seed = seed,
                                  infl_method=infl_method, agg_method=agg_method, module_name=module_name,
                                  filter_perc=filter_perc, source_scores_file=scores_path, target_lmodel_file=last_model_path,
-                                 target_bmodel_file=best_model_path,
+                                 target_bmodel_file=best_model_path, best_loss_model_path = best_loss_model_path,
                                  unfreeze_regex=unfreeze_regex, seed2 = seed2)
     print(f"Finetune with modules: {(infl_method, agg_method, module_name)}")
     num_epochs = config['num_epochs']
@@ -1034,9 +1036,14 @@ def finetune2(task = 'qnli',
     eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, infl_dataloader, device, num_epochs, lr,
                                     compute_gold_val_predictions=True,
                                     best_checkpoint_path=best_model_path,
+                                    best_loss_model_path = best_loss_model_path,
                                     last_checkpoint_path=last_model_path)                                    
 
     del lora_model, train_dataloader, eval_dataloader
+
+    tokenizer.save_pretrained(best_model_path)
+    tokenizer.save_pretrained(best_loss_model_path)
+    tokenizer.save_pretrained(last_model_path)
 
     metric_file = os.path.join(cwd, metrics_file)
     old_gold_val_predictions = np.array(config['finetune']['gold_val_predictions'])
