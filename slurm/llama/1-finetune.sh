@@ -22,6 +22,6 @@ for run_id in {0..4}; do
     echo "Starting finetuning $task $run_id"
     HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
         /home/dvitel.usf/nn-infl/src/exp.py finetune --task=$task --model=meta-llama/Llama-3.2-1B \
-        --unfreeze-regex=.\*\\.embed_tokens\\..\* --lora-targets=q_proj,v_proj
+        --unfreeze-regex=.\*\\.embed_tokens\\..\* --lora-targets=q_proj,v_proj --num-epochs=15
     echo "Done finetuning $task $run_id"
 done
