@@ -22,7 +22,7 @@ from lora_model import build_LORA_model, train_LORA_model, load_pretrained_LORA_
 from influence import IFEngine, compute_hessian_free_influences, compute_datainf_influences, compute_infl_from_model, compute_lissa_influences, compute_accurate_influences, datainf_fn, lissa_fn
 import torch
 from transformers import AutoTokenizer, DataCollatorWithPadding
-from datasets import load_dataset, load_from_disk, Dataset
+from datasets import load_dataset, load_from_disk, Dataset, ClassLabel
 from torch.utils.data import DataLoader
 
 if torch.cuda.is_available():
@@ -41,13 +41,16 @@ torch.cuda.manual_seed_all(seed)
 # torch.backends.cudnn.benchmark = False
 
 task_to_keys = {
-    "cola": ("sentence", None),
     "mrpc": ("sentence1", "sentence2"),
     "qnli": ("question", "sentence"),
     "qqp": ("question1", "question2"),
-    "rte": ("sentence1", "sentence2"),
     "sst2": ("sentence", None),
+
+    "cola": ("sentence", None),
+    "mnli": ("premise", "hypothesis"), # 3 classes --> convert to 2 classes (entailment, not entailment)
+    "rte": ("sentence1", "sentence2"),
     "wnli": ("sentence1", "sentence2"),
+    "stsb": ("sentence1", "sentence2"),
 }
 
 def flip_label(example, ind, noise_index):
@@ -79,6 +82,26 @@ def flip_label(example, ind, noise_index):
 
 def load_noisy_dataset_by_task(task, infl_ratio = 0.5, max_val_size = None, max_train_size = None, noise_ratio=0.2):
     glue_datasets = load_dataset("glue", task) 
+    if task == 'mnli':
+        glue_datasets['train'] = glue_datasets['train'].filter(lambda x: x['label'] != 2)
+        glue_datasets['validation'] = glue_datasets['validation_matched'].filter(lambda x: x['label'] != 2)
+        new_features = glue_datasets['train'].features.copy()
+        new_features['label'] = ClassLabel(names=["entailment", "neutral"])      
+        glue_datasets = glue_datasets.cast(new_features)  
+    if task == 'stsb':
+        def remap_label(row):
+            ''' remaps label 0-5 to two classes 0 and 1 based on threshold 3 '''
+            if row['label'] < 3:
+                row['label'] = 0
+            else:
+                row['label'] = 1
+            return row
+        glue_datasets['train'] = glue_datasets['train'].map(remap_label)
+        glue_datasets['validation'] = glue_datasets['validation'].map(remap_label)
+        new_features = glue_datasets['train'].features.copy()
+        new_features['label'] = ClassLabel(names=["not similar", "similar"])
+        glue_datasets = glue_datasets.cast(new_features)
+
     if max_train_size is not None and max_train_size < len(glue_datasets['train']):
         tmpsets = glue_datasets['train'].train_test_split(train_size = max_train_size, shuffle=True, seed=seed, stratify_by_column='label')
         glue_datasets['train'] = tmpsets['train']
@@ -91,6 +114,11 @@ def load_noisy_dataset_by_task(task, infl_ratio = 0.5, max_val_size = None, max_
     glue_datasets['infl'] = tmpsets['train']
     glue_datasets['validation'] = tmpsets['test']
 
+    ds_names = list(glue_datasets.keys())
+    for key in ds_names:
+        if key not in ['train', 'validation', 'infl']:
+            del glue_datasets[key]
+
     train_size = len(glue_datasets['train'])
 
     if noise_ratio > 0.0:
@@ -100,7 +128,7 @@ def load_noisy_dataset_by_task(task, infl_ratio = 0.5, max_val_size = None, max_
 
     glue_datasets['train'] = glue_datasets['train'].map(flip_label, with_indices=True, fn_kwargs={'noise_index':noise_index})
     
-    glue_datasets.pop('test')
+    # glue_datasets.pop('test')
     
     return glue_datasets
 

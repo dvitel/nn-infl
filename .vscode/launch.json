@@ -56,13 +56,13 @@
             }
         },
         {
-            "name": "Preprocess: GLUE QNLI Distilbert",
+            "name": "Preprocess: GLUE Distilbert",
             "type": "debugpy",
             "request": "launch",
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "preprocess", "--task=qnli", "--tokenizer-name=distilbert/distilroberta-base"
+                "preprocess", "--task=mnli", "--tokenizer-name=distilbert/distilroberta-base"
             ],
             "env": {
                 "INFL_SEED": "0",
