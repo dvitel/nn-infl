@@ -31,7 +31,8 @@ for method_name in "${method_names[@]}"; do
                 HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
                     /home/dvitel.usf/nn-infl/src/exp.py finetune2 --task=$task \
                     --infl-method=$method_name --agg-method=$agg_method --module-name="$module_name" \
-                    --s-prefix=s_l --unfreeze-regex=.\*\\.embed_tokens\\..\* --seed2=$seed2
+                    --s-prefix=s_l --unfreeze-regex=.\*\\.embed_tokens\\..\* --seed2=$seed2 \
+                    --metrics-file=m-l.jsonlist
                 echo "Done finetune2 $task $run_id $seed2 $method_name $agg_method $module_name"
             done
         done
@@ -48,7 +49,8 @@ for method_name in "${new_method_names[@]}"; do
             HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
                 /home/dvitel.usf/nn-infl/src/exp.py finetune2 --task=$task \
                 --infl-method=$method_name --agg-method=$agg_method --module-name=$module_name \
-                --s-prefix=s_b --unfreeze-regex=.\*\\.embed_tokens\\..\* --seed2=$seed2
+                --s-prefix=s_l --unfreeze-regex=.\*\\.embed_tokens\\..\* --seed2=$seed2 \
+                --metrics-file=m-l.jsonlist
             echo "Done finetune2 $task $run_id $seed2 $method_name $agg_method $module_name"
         done
     done 
@@ -65,7 +67,8 @@ for method_name in "${base_method_names[@]}"; do
             HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
                 /home/dvitel.usf/nn-infl/src/exp.py finetune2 --task=$task \
                 --infl-method=$method_name --agg-method=$agg_method --module-name=$module_name \
-                --s-prefix=s_b --unfreeze-regex=.\*\\.embed_tokens\\..\* --seed2=$seed2
+                --s-prefix=s_l --unfreeze-regex=.\*\\.embed_tokens\\..\* --seed2=$seed2 \
+                --metrics-file=m-l.jsonlist
             echo "Done finetune2 $task $run_id $seed2 $method_name $agg_method $module_name"
         done
     done
