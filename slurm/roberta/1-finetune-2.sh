@@ -12,7 +12,7 @@ module load conda/24.7.1
 conda activate /home/dvitel.usf/torch-env
 
 tasks=("cola" "mnli" "rte" "wnli" "stsb")
-learning_rates=(1e-4 1e-4 3e-4 3e-4 1e-4)  # Define learning rates for each task
+learning_rates=(1e-4 1e-4 3e-4 1e-4 1e-4)  # Define learning rates for each task
 lr=${learning_rates[$SLURM_ARRAY_TASK_ID]}  # Get the learning rate for the current task
 
 task=${tasks[$SLURM_ARRAY_TASK_ID]}
