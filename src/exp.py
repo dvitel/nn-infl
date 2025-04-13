@@ -110,9 +110,12 @@ def load_noisy_dataset_by_task(task, infl_ratio = 0.5, max_val_size = None, max_
         glue_datasets['validation'] = tmpsets['train']
 
     infl_size = int(infl_ratio * len(glue_datasets['validation']))
-    tmpsets = glue_datasets['validation'].train_test_split(train_size = infl_size, shuffle=True, seed=seed, stratify_by_column='label') 
-    glue_datasets['infl'] = tmpsets['train']
-    glue_datasets['validation'] = tmpsets['test']
+    if task == 'wnli' or task == 'rte': # very small - we use infl and validation as same set 
+        glue_datasets['infl'] = glue_datasets['validation']
+    else:
+        tmpsets = glue_datasets['validation'].train_test_split(train_size = infl_size, shuffle=True, seed=seed, stratify_by_column='label') 
+        glue_datasets['infl'] = tmpsets['train']
+        glue_datasets['validation'] = tmpsets['test']
 
     ds_names = list(glue_datasets.keys())
     for key in ds_names:
