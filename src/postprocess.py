@@ -1489,6 +1489,7 @@ def get_df_from_file(metric_file: str, suffix):
         runs = [json.loads(l) for l in f.readlines()]
 
     rows = []
+    rand_accuracies = {}
     for r in runs: 
 
         accuracy0 = r["first_finetune"]["accuracy"]
@@ -1524,9 +1525,17 @@ def get_df_from_file(metric_file: str, suffix):
         assert np.allclose(auc_ndr, auc_ndr2, atol=1e-3)
         assert np.allclose(noise_30, filtered, atol=1e-3)
 
+        task = r["config"]["task"]
+        infl_method = r["config"]["infl_method"]
+        seed0 = r["config"]["seed"]
+        seed1 = r["config"]["seed2"]
+
+        if infl_method == "rand":
+            rand_accuracies[(suffix, task, seed0, seed1)] = (best_accuracy, best_infl_accuracy)
+
         row = {"checkpoint": suffix,
-               "task": r["config"]["task"],
-               "infl_method": r["config"]["infl_method"],
+               "task": task,
+               "infl_method": infl_method,
                "agg_method": r["config"]["agg_method"],
                "module": r["config"]["module_name"],
                
@@ -1546,11 +1555,19 @@ def get_df_from_file(metric_file: str, suffix):
                 "infl_loss_0": min_infl_loss0,
                 'infl_loss_1': min_infl_loss,
 
-               "seed0": r["config"]["seed"],
-               "seed1": r["config"]["seed2"],
+               "seed0": seed0,
+               "seed1": seed1,
 
                }
         rows.append(row)
+
+    for r in rows:
+        key = (r["checkpoint"], r["task"], r["seed0"], r["seed1"])
+        rand_accuracy, rand_infl_accuracy = rand_accuracies[key]
+        accuracy_rand_delta = r["best_accuracy_1"] - rand_accuracy
+        infl_accuracy_rand_delta = r["best_infl_accuracy_1"] - rand_infl_accuracy
+        r["accuracy_rand_delta"] = accuracy_rand_delta
+        r["infl_accuracy_rand_delta"] = infl_accuracy_rand_delta
 
     df = pd.DataFrame(rows)
 
@@ -1599,6 +1616,7 @@ def rank_checkpoints(base_path = "data/roberta-2", metric = "noise_30",
     df2 = df1[(df1["agg_method"] != "")]
     df3 = df2[key_columns + [metric]]
     df4 = df3.pivot(index=["task", "infl_method", "agg_method", "module", "seed0", "seed1"], columns="checkpoint", values=metric)
+    df4 = df4[~df4.isna().any(axis=1)]
     df5: DataFrame = df4[df4[checkpoints].gt(0).any(axis=1)]
 
     stats_data = df5.T.to_numpy()
@@ -1661,10 +1679,10 @@ def estimate_ndr(folder:str, prefix: str):
     pass 
 
 if __name__ == "__main__":
-    estimate_ndr("./data/roberta-2/sst2", "s_bl_")
+    # estimate_ndr("./data/roberta-2/sst2", "s_bl_")
 
-    # rank_checkpoints(metric = "best_accuracy_delta")
-    # pass
+    rank_checkpoints(metric = "infl_accuracy_rand_delta")
+    pass
 
     # draw_ft2_metric3('./data/mistral/sst2.jsonlist',
     #                  './data/mistral/sst2-acc-hf.pdf',

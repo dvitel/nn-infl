@@ -1,12 +1,10 @@
 from collections import defaultdict
 import fcntl
 from functools import partial
-from itertools import product
 import json
 import os
 import re
 from time import time
-from typing import Optional
 
 import datasets
 from tqdm import tqdm
@@ -18,7 +16,7 @@ import random
 
 import argh
 import numpy as np
-from lora_model import build_LORA_model, train_LORA_model, load_pretrained_LORA_model, compute_grads
+from lora_model import build_LORA_model, save_checkpoint, train_LORA_model, load_pretrained_LORA_model, compute_grads
 from influence import IFEngine, compute_hessian_free_influences, compute_datainf_influences, compute_infl_from_model, compute_lissa_influences, compute_accurate_influences, datainf_fn, lissa_fn
 import torch
 from transformers import AutoTokenizer, DataCollatorWithPadding
@@ -37,8 +35,8 @@ torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
 
-# torch.backends.cudnn.deterministic = True
-# torch.backends.cudnn.benchmark = False
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
 
 task_to_keys = {
     "mrpc": ("sentence1", "sentence2"),
@@ -202,9 +200,9 @@ def present_token_ids(*dataloaders: DataLoader):
 def build_loaders(dataset_path, tokenizer_name, batch_size = 32, shuffle_train = True, 
                     filter_fn = None):
     datasets = load_from_disk(dataset_path)
-    trainset = datasets['train'] #.select(range(100))
-    valset = datasets['validation'] #.select(range(100))
-    inflset = datasets['infl'] #.select(range(100))
+    trainset = datasets['train']#.select(range(100))
+    valset = datasets['validation']#.select(range(100))
+    inflset = datasets['infl']#.select(range(100))
     if filter_fn is not None:
         trainset = filter_fn(trainset)
     trainset = trainset.remove_columns(['noise'])
@@ -228,14 +226,39 @@ def build_loaders(dataset_path, tokenizer_name, batch_size = 32, shuffle_train =
 
     return train_dataloader, eval_dataloader, infl_dataloader, tokenizer, all_token_ids, mapping_tensor
 
-def info(model: str = 'roberta-large', unfreeze_regex = None, low_rank = 4, lora_targets: str = 'value', out_file: Optional[str] = None):
+def init_checkpoint(task = 'mrpc', model: str = 'roberta-large', unfreeze_regex = None, 
+                    low_rank = 4, lora_targets: str = 'value'):
     ''' Loads and Prints information about the model '''
+
     lora_targets = lora_targets.split(',')
-    lora_model = build_LORA_model(model_name_or_path=model,
-                                target_modules=lora_targets, 
-                                low_rank=low_rank, unfreeze_modules_regex=unfreeze_regex,
-                                model_info_file=(None if out_file is None else os.path.join(cwd, out_file)))
-    del lora_model
+    config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
+    with open(config_path, 'r') as file:
+        config = json.load(file)    
+
+    start_checkpoint_path = os.path.join(cwd, f'm_00_{task}_{seed}')
+    dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
+
+    config.update(low_rank=low_rank, task_name = task, model_name = model,
+                  target_modules=lora_targets, unfreeze_regex = unfreeze_regex,
+                  start_checkpoint_path = start_checkpoint_path,
+                  dataset_path = dataset_path)
+
+    _, _, _, tokenizer, all_token_ids, mapping_tensor = build_loaders(dataset_path, model)
+        
+    lora_model, lora_model_info = build_LORA_model(model_name_or_path=model, pad_token_id=tokenizer.pad_token_id,
+                                                    target_modules=lora_targets,
+                                                    low_rank=low_rank, unfreeze_modules_regex=unfreeze_regex,
+                                                    all_token_ids = all_token_ids, mapping_tensor = mapping_tensor)
+
+    save_checkpoint(lora_model, start_checkpoint_path)
+    tokenizer.save_pretrained(start_checkpoint_path)
+
+    info_path = os.path.join(start_checkpoint_path, 'model-layers-info.txt')
+    with open(info_path, 'w') as file:
+        file.write(str(lora_model_info))
+
+    with open(config_path, 'w') as file:
+        json.dump(config, file)
 
 # def remap_vocab(tokenizer, all_token_ids: torch.Tensor):
 #     old_vocab = tokenizer.vocab
@@ -245,32 +268,50 @@ def info(model: str = 'roberta-large', unfreeze_regex = None, low_rank = 4, lora
 #     tokenizer.tokens_to_ids = new_vocab
 
     
-def finetune(task = 'mrpc', low_rank = 4,
-         device = 'cuda', lr = 1e-4, model = 'roberta-large', batch_size = 32,
-         num_epochs = 10, lora_targets: str = 'value', unfreeze_regex = None, 
-         ignore_metrics = False, m_prefix = 'm'):
+def finetune(task = 'mrpc', device = 'cuda', lr = 3e-4, batch_size = 32, num_epochs = 10):
     ''' Fine tune specific model on specific task and save it to disk for later postprocessing'''
-    lora_targets = lora_targets.split(',')
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)
+        
+    if 'finetune' in config:
+        del config['finetune']
 
-    config.update(low_rank=low_rank, device=device, lr=lr, model=model, batch_size=batch_size,
-                  num_epochs=num_epochs, target_modules=lora_targets, unfreeze_regex = unfreeze_regex)
+    config.update(device=device, lr=lr, batch_size=batch_size, num_epochs=num_epochs)
 
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
-    train_dataloader, eval_dataloader, infl_dataloader, tokenizer, all_token_ids, mapping_tensor = \
+    train_dataloader, eval_dataloader, infl_dataloader, tokenizer, _, _ = \
         build_loaders(dataset_path, config['tokenizer_name'], batch_size)    
 
-    lora_model = build_LORA_model(model_name_or_path=model, pad_token_id=tokenizer.pad_token_id,
-                                target_modules=lora_targets, 
-                                low_rank=low_rank, unfreeze_modules_regex=unfreeze_regex,
-                                all_token_ids = all_token_ids, mapping_tensor = mapping_tensor)
-    
-    best_model_path = os.path.join(cwd, f'{m_prefix}_b_{task}_{seed}')
-    best_loss_model_path = os.path.join(cwd, f'{m_prefix}_bl_{task}_{seed}')
-    last_model_path = os.path.join(cwd, f'{m_prefix}_l_{task}_{seed}')
+    # collected checkpoints     
+    start_checkpoint_path = config['start_checkpoint_path']
+    best_model_path = os.path.join(cwd, f'm_b_{task}_{seed}')
+    best_loss_model_path = os.path.join(cwd, f'm_bl_{task}_{seed}')
+    last_model_path = os.path.join(cwd, f'm_l_{task}_{seed}')
 
+    unfreeze_regex = config.get('unfreeze_regex', None)
+
+    # if os.path.exists(base_model_path):
+    print(f"Loading {start_checkpoint_path}")
+    # todo check if reequires_grad is attached to embedding
+    lora_model = load_pretrained_LORA_model(model_name_or_path=start_checkpoint_path, unfreeze_modules_regex=unfreeze_regex)
+    # else:
+    #     print(f"Creating base checkpoint")
+    #     lora_model = build_LORA_model(model_name_or_path=model, pad_token_id=tokenizer.pad_token_id,
+    #                                 target_modules=lora_targets, 
+    #                                 low_rank=low_rank, unfreeze_modules_regex=unfreeze_regex,
+    #                                 all_token_ids = all_token_ids, mapping_tensor = mapping_tensor)
+
+    #     save_checkpoint(lora_model, base_model_path)
+    #     tokenizer.save_pretrained(base_model_path)
+
+        # lora_model2 = load_pretrained_LORA_model(model_name_or_path=base_model_path, unfreeze_modules_regex=unfreeze_regex)
+
+        # for (name1, param1), (name2, param2) in zip(lora_model.named_parameters(), lora_model2.named_parameters()):
+        #     if "original_module" not in name1:
+        #         assert torch.allclose(param1, param2, rtol=1e-05, atol=1e-08), f'Parameters are not equal: {name1} {name2}'
+
+    
     eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, infl_dataloader, device, num_epochs, lr,
                                     compute_cancellation=True, compute_gold_val_predictions=True, 
                                     best_checkpoint_path = best_model_path,
@@ -279,9 +320,8 @@ def finetune(task = 'mrpc', low_rank = 4,
 
     config['finetune'] = eval_metrics
     
-    if not ignore_metrics:
-        with open(config_path, 'w') as file:
-            json.dump(config, file)       
+    with open(config_path, 'w') as file:
+        json.dump(config, file)       
 
 
     ## next code is for testing weights preservation 
@@ -335,7 +375,7 @@ influence_methods = \
         "exact": compute_accurate_influences
     }
 
-def infl(task = 'mrpc', methods = "hf", self_influence = False, with_grads = False, i_prefix='i', m_prefix='m_b', ignore_metrics = False):
+def infl(task = 'mrpc', methods = "hf", self_influence = False, with_grads = False, i_prefix='i_bl', m_prefix='m_bl', ignore_metrics = False):
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)
@@ -750,17 +790,14 @@ def is_embedding_module(module_name: str):
 
 # Mem koef NOTE: hf (1.1, 0.3), hf_we_ (2, 0.3), hf_we_topk (2, 0.3), cos (1.1, 0.3), cov (2, 0.3), datainf_one (1.1, 0.3), datainf (2, 0.3), 
 def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datainf_one,datainf", mem_koef: float = 2.0, mem_delta: float = 0.3,
-                ignore_metrics = False, i_prefix='i', m_prefix='m_b'):
+                i_prefix='i_bl', m_prefix='m_bl'):
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)
 
     # method_list = methods.split(',')
     device = config['device']
-    if ignore_metrics:
-        unfreeze_regex = None
-    else:
-        unfreeze_regex = config.get('unfreeze_regex', None)
+    unfreeze_regex = config.get('unfreeze_regex', None)
 
     # if with_grads:
     #     gradients = grads(task = task, return_grads=True, config=config, no_val=self_influence)
@@ -789,7 +826,7 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
 
     datasets = load_from_disk(dataset_path) # add validation dataset 
 
-    trainset = datasets['train'] #.select(range(100))
+    trainset = datasets['train']#.select(range(100))
     trainset = trainset.remove_columns(['noise'])
     tokenizer = load_tokenizer(config['tokenizer_name'])
     collator = DataCollatorWithPadding(tokenizer=tokenizer, padding="longest", return_tensors="pt")  
@@ -797,7 +834,7 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
     # method_fn = matrix_infl_methods[method]
     method_names = [name for name in methods.split(',') if name in matrix_infl_methods]
 
-    valset = datasets['infl'] #.select(range(100))
+    valset = datasets['infl']#.select(range(100))
 
     common_tokens = {}
 
@@ -921,8 +958,8 @@ def load_m_info(task_in_dir: str, task:str, m_prefix: str):
     return logits
 
 def scores(task = "qnli", infl_methods: str = 'datainf', agg_methods: str = 'mean', 
-                 i_prefix: str = 'i', m_prefix: str = 'm', group_file: str = '',
-                 include_total = True, s_prefix: str = 's', device = "cuda"):
+                 i_prefix: str = 'i_bl', m_prefix: str = 'm_bl', group_file: str = '',
+                 include_total = True, s_prefix: str = 's_bl', device = "cuda"):
     infl_methods = infl_methods.split(',')
     agg_method_names = agg_methods.split(',')
     if group_file != "":
@@ -1011,36 +1048,31 @@ def scores(task = "qnli", infl_methods: str = 'datainf', agg_methods: str = 'mea
 
 def finetune2(task = 'qnli',
          infl_method='datainf', agg_method='', module_name = '',
-         filter_perc = 0.3, s_prefix='s', unfreeze_regex = None,
-         seed2: int = 0, m_prefix = 'm', metrics_file = 'metrics.jsonlist'):
+         filter_perc = 0.3, s_prefix='s_bl',
+         metrics_file = 'qnli-bl.jsonlist'):
     
-    module_name = module_name.strip("\"")
-    if seed2 != 0: # seed is used for loading files, but seed2 to change init state
-        rand_seed = seed + seed2
-        random.seed(rand_seed)
-        np.random.seed(rand_seed)
-        torch.manual_seed(rand_seed)
-        torch.cuda.manual_seed(rand_seed)
-        torch.cuda.manual_seed_all(rand_seed)            
+    module_name = module_name.strip("\"")   
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)    
     scores_path = os.path.join(cwd, f'{s_prefix}_{seed}.pt')
-    best_model_path = os.path.join(cwd, f'{m_prefix}_2_b_{task}_{seed}')
-    best_loss_model_path = os.path.join(cwd, f'{m_prefix}_2_bl_{task}_{seed}')
-    last_model_path = os.path.join(cwd, f'{m_prefix}_2_l_{task}_{seed}')
+    base_model_path = os.path.join(cwd, f'm_00_{task}_{seed}')
+    best_model_path = os.path.join(cwd, f'm_2_b_{task}_{seed}')
+    best_loss_model_path = os.path.join(cwd, f'm_2_bl_{task}_{seed}')
+    last_model_path = os.path.join(cwd, f'm_2_l_{task}_{seed}')
+    unfreeze_regex = config.get('unfreeze_regex', None)
     finetune2_config=dict(task = task, seed = seed,
                                  infl_method=infl_method, agg_method=agg_method, module_name=module_name,
                                  filter_perc=filter_perc, source_scores_file=scores_path, target_lmodel_file=last_model_path,
                                  target_bmodel_file=best_model_path, best_loss_model_path = best_loss_model_path,
-                                 unfreeze_regex=unfreeze_regex, seed2 = seed2)
+                                 unfreeze_regex=unfreeze_regex)
     print(f"Finetune with modules: {(infl_method, agg_method, module_name)}")
     num_epochs = config['num_epochs']
     device = config['device']
     lr = config['lr']
-    model = config['model']
+    # model = config['model']
     batch_size = config['batch_size']
-    target_modules = config['target_modules']
+    # target_modules = config['target_modules']
     cancel_abs = []
     cancel_norm = []
     scores_dict = torch.load(scores_path)
@@ -1055,14 +1087,19 @@ def finetune2(task = 'qnli',
         return train_dataset.select(train_idxs_left)
     filter_fn = denoise_filter    
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
-    train_dataloader, eval_dataloader, infl_dataloader, tokenizer, all_token_ids, mapping_tensor = \
+    train_dataloader, eval_dataloader, infl_dataloader, tokenizer, _, _ = \
         build_loaders(dataset_path, config['tokenizer_name'], batch_size, filter_fn=filter_fn)
 
-    lora_model = build_LORA_model(model_name_or_path=model, pad_token_id=tokenizer.pad_token_id,
-                                target_modules=target_modules, 
-                                low_rank=config['low_rank'],
-                                unfreeze_modules_regex=unfreeze_regex,
-                                all_token_ids = all_token_ids, mapping_tensor = mapping_tensor)
+    # if os.path.exists(base_model_path):
+    print(f"Loading {base_model_path}")
+    # todo check if reequires_grad is attached to embedding
+    lora_model = load_pretrained_LORA_model(model_name_or_path=base_model_path, unfreeze_modules_regex=unfreeze_regex)
+
+    # lora_model = build_LORA_model(model_name_or_path=model, pad_token_id=tokenizer.pad_token_id,
+    #                             target_modules=target_modules, 
+    #                             low_rank=config['low_rank'],
+    #                             unfreeze_modules_regex=unfreeze_regex,
+    #                             all_token_ids = all_token_ids, mapping_tensor = mapping_tensor)
             
     eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, infl_dataloader, device, num_epochs, lr,
                                     compute_gold_val_predictions=True,
@@ -1117,7 +1154,7 @@ def finetune2(task = 'qnli',
         torch.cuda.empty_cache()
 
 parser = argh.ArghParser()
-parser.add_commands([info, preprocess, finetune, grads, infl, infl_matrix, scores, finetune2])
+parser.add_commands([preprocess, init_checkpoint, finetune, grads, infl, infl_matrix, scores, finetune2])
 
 def test_infl_vs_infl_matrix(file1: str, file2: str):
     infl = torch.load(file1)

@@ -53,7 +53,6 @@ def vocab_remap_forward_pre_hook(module: torch.nn.Module, input):
     # return input
 
 def build_LORA_model(model_name_or_path, target_modules, low_rank, unfreeze_modules_regex: Optional[str] = None,
-                        model_info_file: Optional[str] = None, 
                         all_token_ids: Optional[torch.Tensor] = None, mapping_tensor: Optional[torch.Tensor] = None,
                         pad_token_id = None):
     '''
@@ -102,30 +101,27 @@ def build_LORA_model(model_name_or_path, target_modules, low_rank, unfreeze_modu
         tunable = p.requires_grad
         infos.append({"name": module_name, "numel": p.numel(), "size_gb": size_gb, "shape": shape, 'tunable': tunable})
     num_tunable_p, num_all_p = model.get_nb_trainable_parameters()
-    try:
-        if model_info_file is not None:
-            f = open(model_info_file, "w")
-        else:
-            f = sys.stdout
-        print("Num trainable parameters: %d, num all parameters: %d, %.2f" % (num_tunable_p, num_all_p, round(num_tunable_p * 100 / num_all_p)), file=f)
-        print(tabulate(infos, headers="keys", tablefmt="github", floatfmt=".3f", showindex=True), file=f)
-    finally:
-        if model_info_file is not None:
-            f.close()
-    return model
+    model_info_table = tabulate(infos, headers="keys", tablefmt="github", floatfmt=".3f", showindex=True)
+    model_info_str = "[%s] Num trainable parameters: %d, num all parameters: %d, %.2f" % (model_name_or_path, num_tunable_p, num_all_p, round(num_tunable_p * 100 / num_all_p))
+    model_info_str += "\n" + model_info_table
+    return model, model_info_str
 
 def load_pretrained_LORA_model(model_name_or_path, unfreeze_modules_regex: Optional[str] = None):
     '''
     This function loads a pre-trained model.
     '''
-    base_model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path)
+    base_model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path,
+                                                                    return_dict=True,
+                                                                    torch_dtype = torch.bfloat16,
+                                                                    offload_folder = os.path.join(os.environ['HF_HOME'], ".offload"),
+                                                                    offload_state_dict = True)                                                                    
     base_model.config.use_cache = False
     model = PeftModel.from_pretrained(base_model, model_name_or_path, is_trainable=True)
     # if os.path.exists(f"{model_name_or_path}/emb.pt"):
     emb_params = torch.load(f"{model_name_or_path}/emb.pt")
     embeddings = emb_params.pop('weight')
     mapping = emb_params.pop('mapping')
-    model.config.pad_token_id = emb_params['padding_idx'].item()
+    model.config.pad_token_id = emb_params['padding_idx']
     del emb_params['padding_idx']
     emb = torch.nn.Embedding.from_pretrained(embeddings, padding_idx = model.config.pad_token_id, **emb_params)
     emb.vocab_mapping = mapping
@@ -141,7 +137,7 @@ def save_checkpoint(model: torch.nn.Module, checkpoint_path: str):
     model.save_pretrained(checkpoint_path)
     emb = model.get_input_embeddings()
     emb_data = dict(weight = emb.weight.cpu().detach(), 
-                    padding_idx=emb.padding_idx,
+                    padding_idx=(emb.padding_idx if type(emb.padding_idx) == int else emb.padding_idx.item()),
                     max_norm = emb.max_norm,
                     norm_type = emb.norm_type,
                     scale_grad_by_freq = emb.scale_grad_by_freq,
@@ -170,6 +166,7 @@ def train_LORA_model(model: torch.nn.Module,
     '''
     # metric = evaluate.load("glue", task)
     accuracy_metric = evaluate.load("accuracy")
+    # train_accuracy_metric = evaluate.load("accuracy")
     infl_accuracy_metric = evaluate.load("accuracy")
     f1_metric = evaluate.load("f1")
     optimizer = AdamW(params=model.parameters(), lr=lr)
@@ -283,6 +280,17 @@ def train_LORA_model(model: torch.nn.Module,
                     references=references,
                 )
 
+        # for step, batch in enumerate(tqdm(train_dataloader)):
+        #     batch.to(device)
+        #     with torch.no_grad():
+        #         outputs = model(**batch)
+        #     predictions = outputs.logits.argmax(dim=-1)
+        #     predictions, references = predictions, batch["labels"]
+        #     train_accuracy_metric.add_batch(
+        #         predictions=predictions,
+        #         references=references,
+        #     )                
+
         for step, batch in enumerate(tqdm(eval_dataloader)):
             batch.to(device)
             with torch.no_grad():
@@ -303,9 +311,10 @@ def train_LORA_model(model: torch.nn.Module,
                 gold_val_predictions.extend(batch_gold_preds)
 
         # eval_metric = metric.compute()
+        # train_accuracy = train_accuracy_metric.compute()["accuracy"]
         accuracy = accuracy_metric.compute()
         f1 = f1_metric.compute()
-        metrics = {**accuracy, **f1, "train_loss": np.mean(train_loss)}
+        metrics = {"train_loss": np.mean(train_loss), **accuracy, **f1}
         if len(infl_loss) > 0:
             infl_accuracy = infl_accuracy_metric.compute()["accuracy"]
             infl_loss_value = np.mean(infl_loss)            
