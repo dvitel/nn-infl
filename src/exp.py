@@ -268,7 +268,8 @@ def init_checkpoint(task = 'mrpc', model: str = 'roberta-large', unfreeze_regex 
 #     tokenizer.tokens_to_ids = new_vocab
 
     
-def finetune(task = 'mrpc', device = 'cuda', lr = 3e-4, batch_size = 32, num_epochs = 10):
+def finetune(task = 'mrpc', device = 'cuda', lr = 3e-4, batch_size = 32, num_epochs = 10,
+             fast = False):
     ''' Fine tune specific model on specific task and save it to disk for later postprocessing'''
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
@@ -285,9 +286,17 @@ def finetune(task = 'mrpc', device = 'cuda', lr = 3e-4, batch_size = 32, num_epo
 
     # collected checkpoints     
     start_checkpoint_path = config['start_checkpoint_path']
-    best_model_path = os.path.join(cwd, f'm_b_{task}_{seed}')
-    best_loss_model_path = os.path.join(cwd, f'm_bl_{task}_{seed}')
-    last_model_path = os.path.join(cwd, f'm_l_{task}_{seed}')
+    if fast:
+        best_model_path = None 
+        best_loss_model_path = None
+        last_model_path = None 
+    else:
+        best_model_path = os.path.join(cwd, f'm_b_{task}_{seed}')
+        best_loss_model_path = os.path.join(cwd, f'm_bl_{task}_{seed}')
+        last_model_path = os.path.join(cwd, f'm_l_{task}_{seed}')
+
+    compute_cancellation = not fast
+    compute_gold_val_predictions = not fast
 
     unfreeze_regex = config.get('unfreeze_regex', None)
 
@@ -313,16 +322,22 @@ def finetune(task = 'mrpc', device = 'cuda', lr = 3e-4, batch_size = 32, num_epo
 
     
     eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, infl_dataloader, device, num_epochs, lr,
-                                    compute_cancellation=True, compute_gold_val_predictions=True, 
+                                    compute_cancellation=compute_cancellation, 
+                                    compute_gold_val_predictions=compute_gold_val_predictions, 
                                     best_checkpoint_path = best_model_path,
                                     last_checkpoint_path = last_model_path,
                                     best_loss_model_path = best_loss_model_path)
 
     config['finetune'] = eval_metrics
     
-    with open(config_path, 'w') as file:
-        json.dump(config, file)       
+    if not fast:
+        with open(config_path, 'w') as file:
+            json.dump(config, file)       
 
+
+        tokenizer.save_pretrained(best_model_path)
+        tokenizer.save_pretrained(best_loss_model_path)
+        tokenizer.save_pretrained(last_model_path)
 
     ## next code is for testing weights preservation 
     # lora_model.to('cpu')
@@ -332,10 +347,7 @@ def finetune(task = 'mrpc', device = 'cuda', lr = 3e-4, batch_size = 32, num_epo
     #         assert torch.allclose(param1, param2, rtol=1e-05, atol=1e-08), f'Parameters are not equal: {name1} {name2}'
 
     # lora_model.save_pretrained(model_path)
-    tokenizer.save_pretrained(best_model_path)
-    tokenizer.save_pretrained(best_loss_model_path)
-    tokenizer.save_pretrained(last_model_path)
-
+    
     del lora_model, train_dataloader, eval_dataloader
 
     with torch.no_grad():
