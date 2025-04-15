@@ -19,7 +19,8 @@ task_cwd=/blue/anshumanc.usf/nn-infl/roberta/$task
 
 agg_method='mean'
 method_names=('hf' 'datainf' 'cos')
-module_names=('WE' '' '00-05' '06-11' '12-17' '18-23' '00-05 A' '06-11 A' '12-17 A' '18-23 A' '00-05 B' '06-11 B' '12-17 B' '18-23 B' '23' 'CL')
+# module_names=('WE' '' '00-05' '06-11' '12-17' '18-23' '00-05 A' '06-11 A' '12-17 A' '18-23 A' '00-05 B' '06-11 B' '12-17 B' '18-23 B' '23' 'CL')
+module_names=('WE' '' '00-05' '06-11' '12-17' '18-23' 'CL')
 
 for method_name in "${method_names[@]}"; do
     for module_name in "${module_names[@]}"; do
