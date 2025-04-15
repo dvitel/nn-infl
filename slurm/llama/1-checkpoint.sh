@@ -1,7 +1,7 @@
 #!/bin/bash -l
-#SBATCH --job-name=l-pre
+#SBATCH --job-name=l-init
 #SBATCH --time=72:00:00
-#SBATCH --output 0-pre-%a.out
+#SBATCH --output 1-init-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/llama
 #SBATCH -p hpg-ai # run on partition general
 #SBATCH --gpus=1 # 1 GPU
@@ -20,9 +20,10 @@ task_cwd=/blue/anshumanc.usf/nn-infl/llama/$task
 mkdir -p $task_cwd
 
 for run_id in {0..9}; do
-    echo "Starting preprocess $task $run_id"
+    echo "Init start checkpoint $task $run_id"
     HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
-        /home/dvitel.usf/nn-infl/src/exp.py preprocess --task=$task --tokenizer-name=meta-llama/Llama-3.2-1B
-    echo "Done preprocess $task $run_id"
+        /home/dvitel.usf/nn-infl/src/exp.py init-checkpoint --task=$task --model=meta-llama/Llama-3.2-1B \
+        --unfreeze-regex=.\*\\.embed_tokens\\..\* --lora-targets=q_proj,v_proj
+    echo "Done init checkpoint $task $run_id"
     echo "----------------------------------"
 done

@@ -12,16 +12,18 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Info Roberta-large",
+            "name": "Init Distilbert",
             "type": "debugpy",
             "request": "launch",
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "info", "--model=roberta-large", "--unfreeze-regex=.*\\.word_embeddings\\..*", "--lora-targets=query,value", "--out-file=model-info.txt"
+                "init-checkpoint", "--task=qnli", "--model=distilbert/distilroberta-base", 
+                "--unfreeze-regex=.*\\.word_embeddings\\..*", 
+                "--lora-targets=query,value"
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev/roberta/qnli"
             }
         },
@@ -35,7 +37,7 @@
                 "info", "--model=meta-llama/Llama-3.2-1B", "--unfreeze-regex=.*\\.embed_tokens\\..*", "--lora-targets=q_proj,v_proj", "--out-file=model-info.txt"
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev/llama/qnli",
                 "HF_TOKEN": "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"
             }
@@ -50,7 +52,7 @@
                 "info", "--model=mistralai/Mistral-7B-v0.3", "--unfreeze-regex=.*\\.embed_tokens\\..*", "--lora-targets=q_proj,v_proj", "--out-file=model-info.txt"
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev/mistral/qnli",
                 "HF_TOKEN": "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"
             }
@@ -62,10 +64,10 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "preprocess", "--task=mnli", "--tokenizer-name=distilbert/distilroberta-base"
+                "preprocess", "--task=qnli", "--tokenizer-name=distilbert/distilroberta-base"
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev/roberta/qnli"
             }
         },
@@ -79,7 +81,7 @@
                 "preprocess", "--task=qnli", "--tokenizer-name=meta-llama/Llama-3.2-1B"
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev/llama/qnli",
                 "HF_TOKEN": "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"
             }
@@ -94,7 +96,7 @@
                 "preprocess", "--task=qnli", "--tokenizer-name=mistralai/Mistral-7B-v0.3"
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev/mistral/qnli",
                 "HF_TOKEN": "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"
             }
@@ -109,7 +111,7 @@
                 "preprocess", "--dataset=cifar10"
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev"
             }
         },   
@@ -124,7 +126,7 @@
                 "finetune", "--dataset-path=./data/dev/d_cifar10_0", "--model-name=resnet34", "--noise-type=worst", "--num-epochs=2"
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev"
             }
         },     
@@ -139,7 +141,7 @@
                 "checkpoint", "--cp=./data/dev/m_cifar10_resnet34_0"
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev"
             }
         },        
@@ -154,7 +156,7 @@
                 "grads", "--dataset-name=cifar10", "--model-name=resnet34"
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev"
             }
         },         
@@ -169,7 +171,7 @@
                 "infl", "--dataset-name=cifar10", "--model-name=resnet34", "--method=datainf", "--size-koef=0.8"
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev"
             }
         },             
@@ -184,7 +186,7 @@
                 "infl-matrix", "--dataset-name=cifar10", "--model-name=resnet34", "--method=cov", "--size-koef=0.8"
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev"
             }
         },                             
@@ -195,10 +197,10 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "finetune", "--task=qnli", "--model=distilbert/distilroberta-base", "--num-epochs=2", "--unfreeze-regex=.*\\.word_embeddings\\..*"
+                "finetune", "--task=qnli", "--num-epochs=2",
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev/roberta/qnli"
             }
         },
@@ -212,7 +214,7 @@
                 "finetune", "--task=qnli", "--model=meta-llama/Llama-3.2-1B", "--num-epochs=2", "--unfreeze-regex=.*\\.embed_tokens\\..*",  "--m-prefix=m2", "--lora-targets=q_proj,v_proj"
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev/llama/qnli",
                 "HF_TOKEN": "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"
             }
@@ -227,7 +229,7 @@
                 "finetune", "--task=qnli", "--model=mistralai/Mistral-7B-v0.3", "--num-epochs=2", "--unfreeze-regex=.*\\.embed_tokens\\..*", "--ignore-metrics", "--m-prefix=m2", "--lora-targets=q_proj,v_proj"
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev/mistral/qnli",
                 "HF_TOKEN": "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"
             }
@@ -242,7 +244,7 @@
                 "grads", "--task=qnli"
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev/roberta/qnli"
             }
         },        
@@ -256,7 +258,7 @@
                 "infl", "--task=qnli", "--methods=hf", "--with-grads", "--ignore-metrics", "--i-prefix=i2", "--m-prefix=m2"
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev/roberta/qnli"
             }
         },
@@ -267,10 +269,10 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "infl-matrix", "--task=qnli", "--methods=hf_we_", "--mem-koef=1.1", "--m-prefix=m_b", "--i-prefix=i_b"
+                "infl-matrix", "--task=qnli", "--methods=hf", "--mem-koef=1.1", "--m-prefix=m_bl", "--i-prefix=i_bl"
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev/roberta/qnli"
             }
         },        
@@ -281,10 +283,10 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "scores", "--task=qnli", "--infl-methods=datainf,cos,hf,rand,denoise", "--agg-methods=mean,mean_10,mean_50,dir,rank", "--m-prefix=m_b", "--i-prefix=i_b", "--s-prefix=s_b", "--group-file=../groups.json"
+                "scores", "--task=qnli", "--infl-methods=hf", "--agg-methods=mean,mean_10,mean_50,dir,rank", "--m-prefix=m_bl", "--i-prefix=i_bl", "--s-prefix=s_bl", "--group-file=../groups.json"
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev/roberta/qnli"
             }
         },                
@@ -295,10 +297,10 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "finetune2", "--task=qnli", "--infl-method=datainf", "--agg-method=mean", "--module-name=\"00-05 A\"", "--s-prefix=s_b", "--unfreeze-regex=.*\\.word_embeddings\\..*", "--seed2=10"
+                "finetune2", "--task=qnli", "--infl-method=hf", "--agg-method=mean", "--module-name=\"00-05 A\"", "--s-prefix=s_bl"
             ],
             "env": {
-                "INFL_SEED": "0",
+                "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev/roberta/qnli"
             }
         }        
