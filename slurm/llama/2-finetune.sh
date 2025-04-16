@@ -11,8 +11,9 @@
 module load conda/24.7.1
 conda activate /home/dvitel.usf/torch-env
 
+#sst2 qqp mnli rte stsb
 tasks=("qnli" "mrpc" "sst2" "qqp" "cola" "mnli" "rte" "stsb")
-learning_rates=(5e-5 5e-5 5e-5 5e-5 5e-5 5e-5 5e-5 5e-5)  # Define learning rates for each task
+learning_rates=(1e-4 1e-4 1e-4 1e-4 1e-4 1e-4 1e-4 1e-4)  # Define learning rates for each task
 
 lr=${learning_rates[$SLURM_ARRAY_TASK_ID]}  # Get the learning rate for the current task
 
@@ -20,7 +21,7 @@ task=${tasks[$SLURM_ARRAY_TASK_ID]}
 
 task_cwd=/blue/anshumanc.usf/nn-infl/llama/$task
 
-for run_id in {0..9}; do
+for run_id in {0..4}; do
     echo "Starting finetuning $task $run_id with learning rate $lr"
     HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
         /home/dvitel.usf/nn-infl/src/exp.py finetune --task=$task --num-epochs=10 --lr=$lr
