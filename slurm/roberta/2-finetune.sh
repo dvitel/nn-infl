@@ -6,12 +6,12 @@
 #SBATCH -p hpg-ai # run on partition general
 #SBATCH --gpus=1 # 1 GPU
 #SBATCH --mem=16G # default 4GB
-#SBATCH --array=0-8
+#SBATCH --array=0-7
 
 module load conda/24.7.1
 conda activate /home/dvitel.usf/torch-env
 
-tasks=("qnli" "mrpc" "sst2" "qqp" "cola" "mnli" "rte" "wnli" "stsb")
+tasks=("qnli" "mrpc" "sst2" "qqp" "cola" "mnli" "rte" "stsb")
 learning_rates=(3e-4 3e-4 3e-4 3e-4 3e-4 3e-4 3e-4 3e-4 3e-4)  # Define learning rates for each task
 
 lr=${learning_rates[$SLURM_ARRAY_TASK_ID]}  # Get the learning rate for the current task

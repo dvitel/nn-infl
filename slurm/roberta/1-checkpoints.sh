@@ -5,13 +5,13 @@
 #SBATCH -D /blue/anshumanc.usf/nn-infl/roberta
 #SBATCH -p hpg-ai # run on partition general
 #SBATCH --gpus=1 # 1 GPU
-#SBATCH --array=0-8
+#SBATCH --array=0-7
 
 module load conda/24.7.1
 conda activate /home/dvitel.usf/torch-env
 
 # one job per task 
-tasks=("qnli" "mrpc" "sst2" "qqp" "cola" "mnli" "rte" "wnli" "stsb")
+tasks=("qnli" "mrpc" "sst2" "qqp" "cola" "mnli" "rte" "stsb")
 
 task=${tasks[$SLURM_ARRAY_TASK_ID]}
 
