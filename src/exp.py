@@ -141,7 +141,7 @@ def load_tokenizer(tokenizer_name):
     # if "llama" in tokenizer_name:          
     #     tokenizer.pad_token = "<|reserved_special_token_0|>"
     #     tokenizer.pad_token_id = tokenizer.vocab[tokenizer.pad_token]
-    if ("llama" in tokenizer_name) or ("mistral" in tokenizer_name):
+    if ("Llama" in tokenizer_name) or ("mistral" in tokenizer_name):
         tokenizer.pad_token = tokenizer.unk_token
         tokenizer.pad_token_id = tokenizer.unk_token_id
     return tokenizer
@@ -673,8 +673,8 @@ def matrix_datainf_continuation(module_int_matrices: dict[str, torch.Tensor], mo
         del val_train_prods, train_train_prods
         pass
 
-# NOTE: the following method does not work because we need to iterate through training samples twice if we want to implement datainf
-# it only works when train_grad contains all training samples
+# NOTE: it only works when train_grad contains all training samples
+# NOTE: we need to iterate through training samples twice if we want to implement datainf
 def matrix_datainf_fn(__: torch.Tensor, val_grad: torch.Tensor, train_grad: torch.Tensor, lambda_const_param = 10,
                         *, use_orig_def = False, module_name: str, infl_context: dict, train_shift: int, val_shift: int, full_train_size: int, full_val_size: int,
                         **_) -> None:
@@ -1061,7 +1061,7 @@ def scores(task = "qnli", infl_methods: str = 'datainf', agg_methods: str = 'mea
 
 def finetune2(task = 'qnli',
          infl_method='datainf', agg_method='', module_name = '',
-         filter_perc = 0.3, s_prefix='s_bl',
+         filter_perc = 0.3, s_prefix='s_bl', fix_labels = False,
          metrics_file = 'qnli-bl.jsonlist'):
     
     module_name = module_name.strip("\"")   
@@ -1097,6 +1097,11 @@ def finetune2(task = 'qnli',
         nonlocal noise_list
         noise_list = train_dataset['noise']
         return train_dataset.select(train_idxs_left)
+    def fix_label_filter(train_dataset, train_idxs_left = train_idxs_left):        
+        nonlocal noise_list
+        noise_list = train_dataset['noise']
+        return train_dataset.select(train_idxs_left)
+    # if fix_labels:
     filter_fn = denoise_filter    
     dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
     train_dataloader, eval_dataloader, infl_dataloader, tokenizer, _, _ = \
