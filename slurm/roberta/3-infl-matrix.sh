@@ -20,7 +20,7 @@ task_cwd=/blue/anshumanc.usf/nn-infl/roberta/$task
 method_name=datainf
 mem_koef=2.0
 
-for run_id in {0..9}; do
+for run_id in {0..4}; do
 
     echo "Infl matrix $task $run_id $method_name"
     HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
@@ -34,7 +34,7 @@ done
 method_name=cos
 mem_koef=1.1
 
-for run_id in {0..9}; do
+for run_id in {0..4}; do
 
     echo "Infl matrix $task $run_id $method_name"
     HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
@@ -48,7 +48,7 @@ done
 method_name=hf
 mem_koef=1.1
 
-for run_id in {0..9}; do
+for run_id in {0..4}; do
 
     echo "Infl matrix $task $run_id $method_name"
     HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
@@ -63,7 +63,7 @@ done
 method_name='hf_we_topk_10'
 mem_koef=2.2
 
-for run_id in {0..9}; do
+for run_id in {0..4}; do
 
     echo "Infl matrix $task $run_id $method_name"
     HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
@@ -76,7 +76,7 @@ done
 method_name='hf_we_'
 mem_koef=2.2
 
-for run_id in {0..9}; do
+for run_id in {0..4}; do
 
     echo "Infl matrix $task $run_id $method_name"
     HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \

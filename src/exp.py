@@ -248,7 +248,7 @@ def init_checkpoint(task = 'mrpc', model: str = 'roberta-large', unfreeze_regex 
         
     lora_model, lora_model_info = build_LORA_model(model_name_or_path=model, pad_token_id=tokenizer.pad_token_id,
                                                     target_modules=lora_targets,
-                                                    low_rank=low_rank, unfreeze_modules_regex=unfreeze_regex,
+                                                    low_rank=low_rank, unfreeze_modules_regex=None,
                                                     all_token_ids = all_token_ids, mapping_tensor = mapping_tensor)
 
     save_checkpoint(lora_model, start_checkpoint_path)
@@ -299,12 +299,12 @@ def finetune(task = 'mrpc', device = 'cuda', lr = 3e-4, batch_size = 32, num_epo
     compute_cancellation = not fast
     compute_gold_val_predictions = not fast
 
-    unfreeze_regex = config.get('unfreeze_regex', None)
+    # unfreeze_regex = config.get('unfreeze_regex', None)
 
     # if os.path.exists(base_model_path):
     print(f"Loading {start_checkpoint_path}")
     # todo check if reequires_grad is attached to embedding
-    lora_model = load_pretrained_LORA_model(model_name_or_path=start_checkpoint_path, unfreeze_modules_regex=unfreeze_regex)
+    lora_model = load_pretrained_LORA_model(model_name_or_path=start_checkpoint_path, unfreeze_modules_regex=None)
     # else:
     #     print(f"Creating base checkpoint")
     #     lora_model = build_LORA_model(model_name_or_path=model, pad_token_id=tokenizer.pad_token_id,
@@ -1073,12 +1073,11 @@ def finetune2(task = 'qnli',
     best_model_path = os.path.join(cwd, f'm_2_b_{task}_{seed}')
     best_loss_model_path = os.path.join(cwd, f'm_2_bl_{task}_{seed}')
     last_model_path = os.path.join(cwd, f'm_2_l_{task}_{seed}')
-    unfreeze_regex = config.get('unfreeze_regex', None)
+    # unfreeze_regex = config.get('unfreeze_regex', None)
     finetune2_config=dict(task = task, seed = seed,
                                  infl_method=infl_method, agg_method=agg_method, module_name=module_name,
                                  filter_perc=filter_perc, source_scores_file=scores_path, target_lmodel_file=last_model_path,
-                                 target_bmodel_file=best_model_path, best_loss_model_path = best_loss_model_path,
-                                 unfreeze_regex=unfreeze_regex)
+                                 target_bmodel_file=best_model_path, best_loss_model_path = best_loss_model_path)
     print(f"Finetune with modules: {(infl_method, agg_method, module_name)}")
     num_epochs = config['num_epochs']
     device = config['device']
@@ -1106,7 +1105,7 @@ def finetune2(task = 'qnli',
     # if os.path.exists(base_model_path):
     print(f"Loading {base_model_path}")
     # todo check if reequires_grad is attached to embedding
-    lora_model = load_pretrained_LORA_model(model_name_or_path=base_model_path, unfreeze_modules_regex=unfreeze_regex)
+    lora_model = load_pretrained_LORA_model(model_name_or_path=base_model_path, unfreeze_modules_regex=None)
 
     # lora_model = build_LORA_model(model_name_or_path=model, pad_token_id=tokenizer.pad_token_id,
     #                             target_modules=target_modules, 
