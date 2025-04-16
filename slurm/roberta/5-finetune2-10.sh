@@ -29,7 +29,7 @@ for method_name in "${method_names[@]}"; do
             HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
                 /home/dvitel.usf/nn-infl/src/exp.py finetune2 --task=$task \
                 --infl-method=$method_name --agg-method=$agg_method --module-name=$module_name \
-                --s-prefix=s_bl --metrics-file=$task-bl.jsonlist --filter-perc=0.3
+                --s-prefix=s_bl --metrics-file=$task-bl.jsonlist --filter-perc=0.1
             echo "Done finetune2 $task $run_id $method_name $agg_method $module_name"
             echo "----------------------------------"
         done
@@ -45,7 +45,7 @@ for method_name in "${new_method_names[@]}"; do
         HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
             /home/dvitel.usf/nn-infl/src/exp.py finetune2 --task=$task \
             --infl-method=$method_name --agg-method=$agg_method --module-name=$module_name \
-            --s-prefix=s_bl --metrics-file=$task-bl.jsonlist --filter-perc=0.3
+            --s-prefix=s_bl --metrics-file=$task-bl.jsonlist --filter-perc=0.1
         echo "Done finetune2 $task $run_id $method_name $agg_method $module_name"
         echo "----------------------------------"
     done
@@ -61,7 +61,7 @@ for method_name in "${base_method_names[@]}"; do
         HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
             /home/dvitel.usf/nn-infl/src/exp.py finetune2 --task=$task \
             --infl-method=$method_name --agg-method=$agg_method --module-name=$module_name \
-            --s-prefix=s_bl --metrics-file=$task-bl.jsonlist --filter-perc=0.3
+            --s-prefix=s_bl --metrics-file=$task-bl.jsonlist --filter-perc=0.1
         echo "Done finetune2 $task $run_id $method_name $agg_method $module_name"
         echo "----------------------------------"
     done
