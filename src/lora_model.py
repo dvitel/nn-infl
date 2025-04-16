@@ -88,6 +88,8 @@ def build_LORA_model(model_name_or_path, target_modules, low_rank, unfreeze_modu
         new_embedding_layer.vocab_mapping = mapping_tensor
         new_embedding_layer.register_forward_pre_hook(vocab_remap_forward_pre_hook)
         model.set_input_embeddings(new_embedding_layer)
+        for p in new_embedding_layer.parameters():
+            p.requires_grad = False #reuse them
         # model.tie_weights() - does not work - resort to save our custom embeddings
 
     unfreeze_modules(model, unfreeze_modules_regex)
@@ -127,6 +129,8 @@ def load_pretrained_LORA_model(model_name_or_path, unfreeze_modules_regex: Optio
     emb.vocab_mapping = mapping
     emb.register_forward_pre_hook(vocab_remap_forward_pre_hook)
     model.set_input_embeddings(emb)
+    for p in emb.parameters():
+        p.requires_grad = False #reuse them    
 
     unfreeze_modules(model, unfreeze_modules_regex)
     
