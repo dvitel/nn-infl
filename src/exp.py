@@ -138,10 +138,10 @@ def load_tokenizer(tokenizer_name):
     #   `(tokenizer.pad_token = tokenizer.eos_token e.g.)` or add a new pad token via `tokenizer.add_special_tokens({'pad_token': '[PAD]'})`.    
 
     # for llama v3.2
-    # if "llama" in tokenizer_name:          
-    #     tokenizer.pad_token = "<|reserved_special_token_0|>"
-    #     tokenizer.pad_token_id = tokenizer.vocab[tokenizer.pad_token]
-    if ("Llama" in tokenizer_name) or ("mistral" in tokenizer_name):
+    if "Llama-3.2" in tokenizer_name:          
+        tokenizer.pad_token = "<|reserved_special_token_0|>"
+        tokenizer.pad_token_id = tokenizer.vocab[tokenizer.pad_token]
+    elif ("Llama" in tokenizer_name) or ("mistral" in tokenizer_name):
         tokenizer.pad_token = tokenizer.unk_token
         tokenizer.pad_token_id = tokenizer.unk_token_id
     return tokenizer
