@@ -19,7 +19,7 @@ task_cwd=/blue/anshumanc.usf/nn-infl/roberta/$task
 
 mkdir -p $task_cwd
 
-for run_id in {0..4}; do
+for run_id in {5..9}; do
     echo "Starting preprocess $task $run_id"
     HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
         /home/dvitel.usf/nn-infl/src/exp.py preprocess --task=$task --tokenizer-name=roberta-large

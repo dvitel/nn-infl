@@ -24,7 +24,7 @@ module_names=('WE' '' '00-05' '06-11' '12-17' '18-23' 'CL')
 
 for method_name in "${method_names[@]}"; do
     for module_name in "${module_names[@]}"; do
-        for run_id in {0..4}; do
+        for run_id in {5..9}; do
             echo "Finetune2 $task $run_id $method_name $agg_method $module_name"
             HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
                 /home/dvitel.usf/nn-infl/src/exp.py finetune2 --task=$task \
@@ -40,7 +40,7 @@ new_method_names=('hf_we_' 'hf_we_topk_10')
 module_name='WE'
 
 for method_name in "${new_method_names[@]}"; do
-    for run_id in {0..4}; do
+    for run_id in {5..9}; do
         echo "Finetune2 $task $run_id $method_name $agg_method $module_name"
         HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
             /home/dvitel.usf/nn-infl/src/exp.py finetune2 --task=$task \
@@ -56,7 +56,7 @@ agg_method=''
 module_name=''
 
 for method_name in "${base_method_names[@]}"; do
-    for run_id in {0..4}; do
+    for run_id in {5..9}; do
         echo "Finetune2 $task $run_id $method_name $agg_method $module_name"
         HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
             /home/dvitel.usf/nn-infl/src/exp.py finetune2 --task=$task \
