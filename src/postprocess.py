@@ -266,6 +266,166 @@ def mean_matrix_score(int_matrix: torch.Tensor, *, trim_ratio = None, **_) -> to
         scores = int_matrix.mean(dim=(-2,-1))
     return scores
 
+# common set on missed influence samples
+# def csmi_matrix_score(int_matrix: torch.Tensor, *, noise_mask: torch.Tensor, 
+#                               trainset_labels: torch.Tensor, inflset_labels: torch.Tensor,
+#                               inflset_logits: torch.Tensor,
+#                               same_class = False, descending = False, vote_ratio = 0.3, noise_ratio = 0.3, **_) -> torch.Tensor:
+#     ''' 3-D tensor: train sample * module * infl sample '''
+    
+#     global_total_int_matrix = int_matrix.mean(dim=-2)
+
+#     infl_predictions = torch.argmax(inflset_logits, dim = -1)
+
+#     unique_classes = torch.unique(trainset_labels)
+
+#     infl_groups = {}
+
+#     for label in unique_classes:
+#         infl1 = torch.where((inflset_labels == label) & (inflset_labels == infl_predictions))[0]
+#         infl2 = torch.where((inflset_labels == label) & (inflset_labels != infl_predictions))[0]
+#         infl3 = torch.where((inflset_labels != label) & (inflset_labels == infl_predictions))[0]
+#         infl4 = torch.where((inflset_labels != label) & (inflset_labels != infl_predictions))[0]
+
+#         infl_groups[label] = (infl1, infl2, infl3, infl4)        
+
+
+#     train_ids = []
+#     infl_ids = []
+#     for label in unique_classes:
+#         infl1 = torch.where((inflset_labels == label) & (inflset_labels == infl_predictions))[0]
+#         infl2 = torch.where((inflset_labels == label) & (inflset_labels != infl_predictions))[0]
+#         infl3 = torch.where((inflset_labels != label) & (inflset_labels == infl_predictions))[0]
+#         infl4 = torch.where((inflset_labels != label) & (inflset_labels != infl_predictions))[0]
+
+#         label_train_ids = torch.where(trainset_labels == label)[0]
+#         train_ids.append(label_train_ids)
+#         infl_ids.append(infl1)
+#         train_ids.append(label_train_ids)
+#         infl_ids.append(infl2)
+#         train_ids.append(label_train_ids)
+#         infl_ids.append(infl3)
+#         train_ids.append(label_train_ids)
+#         infl_ids.append(infl4)                        
+#         # if same_class:
+#         #     infl_ids.append(torch.where((inflset_labels == label) & (inflset_labels == infl_predictions))[0])
+#         # else:
+#         #     infl_ids.append(torch.where((inflset_labels != label) & (inflset_labels == infl_predictions))[0])
+#     scores = torch.zeros(global_total_int_matrix.shape[0], dtype = torch.float, device = global_total_int_matrix.device)
+#     for one_train_ids, one_infl_ids in zip(train_ids, infl_ids):
+#         total_int_matrix = global_total_int_matrix[one_train_ids][:, one_infl_ids]
+#         test_ids_ordered = total_int_matrix.argsort(dim=0, descending = descending)
+#         # infl_sets = [set() for _ in range(total_int_matrix.shape[-1])]
+#         noise_size = int(noise_ratio * total_int_matrix.shape[0])
+#         mask = torch.zeros_like(test_ids_ordered, dtype=torch.bool, device = test_ids_ordered.device)
+#         col_range = torch.arange(test_ids_ordered.shape[-1], device = test_ids_ordered.device)
+#         for t in range(total_int_matrix.shape[0]):
+#             mask[test_ids_ordered[t], col_range] = True 
+#             votes = torch.sum(mask, dim=-1, dtype=torch.float) / test_ids_ordered.shape[-1]
+#             commonset = torch.where(votes >= vote_ratio)[0]
+#             if len(commonset) >= noise_size:
+#                 break
+#         one_scores = 1.0 - votes
+
+#         selected_ids = torch.argsort(one_scores)[:noise_size]
+#         noise_ndr1 = noise_mask[selected_ids].sum().item() / 900
+#         print(noise_ndr1)
+#         # selected_ids = torch.asgsort(one_scores)[noise_size:]
+#         # noise_ndr2 = noise_mask[selected_ids].sum().item()
+#         # print(noise_ndr2)
+#         scores[one_train_ids] = one_scores
+#     # scores = torch.zeros(int_matrix.shape[0], dtype = torch.float, device = total_int_matrix.device)
+#     # scores[commonset] = -1.0     
+#     return scores    
+
+def commonsubset_matrix_score(int_matrix: torch.Tensor, *, noise_mask: torch.Tensor, 
+                              trainset_labels: torch.Tensor, inflset_labels: torch.Tensor,
+                              same_class = False, descending = False, vote_ratio = 0.4, noise_ratio = 0.3, **_) -> torch.Tensor:
+    ''' 3-D tensor: train sample * module * infl sample '''
+    
+    global_total_int_matrix = int_matrix.mean(dim=-2)
+
+    unique_classes = torch.unique(trainset_labels)
+    train_ids = []
+    infl_ids = []
+    for label in unique_classes:
+        train_ids.append(torch.where(trainset_labels == label)[0])
+        if same_class:
+            infl_ids.append(torch.where(inflset_labels == label)[0])
+        else:
+            infl_ids.append(torch.where(inflset_labels != label)[0])
+    scores = torch.zeros(global_total_int_matrix.shape[0], dtype = torch.float, device = global_total_int_matrix.device)
+    for one_train_ids, one_infl_ids in zip(train_ids, infl_ids):
+        total_int_matrix = global_total_int_matrix[one_train_ids][:, one_infl_ids]
+        test_ids_ordered = total_int_matrix.argsort(dim=0, descending = descending)
+        # infl_sets = [set() for _ in range(total_int_matrix.shape[-1])]
+        noise_size = int(noise_ratio * total_int_matrix.shape[0])
+        mask = torch.zeros_like(test_ids_ordered, dtype=torch.bool, device = test_ids_ordered.device)
+        col_range = torch.arange(test_ids_ordered.shape[-1], device = test_ids_ordered.device)
+        for t in range(total_int_matrix.shape[0]):
+            mask[test_ids_ordered[t], col_range] = True 
+            votes = torch.sum(mask, dim=-1, dtype=torch.float) / test_ids_ordered.shape[-1]
+            commonset = torch.where(votes >= vote_ratio)[0]
+            if len(commonset) >= noise_size:
+                break
+        one_scores = 1.0 - votes
+        scores[one_train_ids] = one_scores
+    # scores = torch.zeros(int_matrix.shape[0], dtype = torch.float, device = total_int_matrix.device)
+    # scores[commonset] = -1.0     
+    return scores    
+
+def commonset_matrix_score(int_matrix: torch.Tensor, *, noise_mask: torch.Tensor, vote_ratio = 0.2, noise_ratio = 0.3, **_) -> torch.Tensor:
+    ''' 3-D tensor: train sample * module * infl sample '''
+    total_int_matrix = int_matrix.mean(dim=-2)
+    test_ids_ordered = total_int_matrix.argsort(dim=0)
+    # infl_sets = [set() for _ in range(total_int_matrix.shape[-1])]
+    noise_size = int(noise_ratio * total_int_matrix.shape[0])
+    mask = torch.zeros_like(test_ids_ordered, dtype=torch.bool, device = test_ids_ordered.device)
+    col_range = torch.arange(test_ids_ordered.shape[-1], device = test_ids_ordered.device)
+    for t in range(total_int_matrix.shape[0]):
+        mask[test_ids_ordered[t], col_range] = True 
+        votes = torch.sum(mask, dim=-1, dtype=torch.float) / test_ids_ordered.shape[-1]
+        commonset = torch.where(votes >= vote_ratio)[0]
+        if len(commonset) >= noise_size:
+            break
+    scores = 1.0 - votes
+    # scores = torch.zeros(int_matrix.shape[0], dtype = torch.float, device = total_int_matrix.device)
+    # scores[commonset] = -1.0     
+    return scores
+
+def get_pareto_front_indexes_neg(int_matrix: torch.Tensor) -> np.ndarray:
+    ''' Get the pareto front from a population. 
+        NOTE: greater is better here. Invert your fitness if it is the opposite.
+    '''
+    # mask = np.ones(int_matrix.shape[0], dtype=bool)
+    # mask[exclude_indexes] = False
+    # index_remap = np.where(mask)[0]
+    domination_matrix = torch.all(int_matrix[:, None] >= int_matrix, dim=2) & torch.any(int_matrix[:, None] > int_matrix, axis=2)
+    indexes = torch.where(~torch.any(domination_matrix, axis=1))[0]
+    return indexes
+
+def pareto_matrix_score(int_matrix: torch.Tensor, *, noise_mask: torch.Tensor, noise_ratio = 0.3, **_) -> torch.Tensor:
+    ''' 3-D tensor: train sample * module * infl sample '''
+    total_int_matrix = int_matrix.mean(dim=-2)
+    total_int_matrix = total_int_matrix[:, :10]
+    scores = torch.zeros(total_int_matrix.shape[0], dtype=total_int_matrix.dtype, device = total_int_matrix.device)
+    dom_ids = get_pareto_front_indexes_neg(total_int_matrix)
+    scores[dom_ids] -= 1
+    # infl_sets = [set() for _ in range(total_int_matrix.shape[-1])]
+    # noise_size = int(noise_ratio * total_int_matrix.shape[0])
+    # mask = torch.zeros_like(test_ids_ordered, dtype=torch.bool, device = test_ids_ordered.device)
+    # col_range = torch.arange(test_ids_ordered.shape[-1], device = test_ids_ordered.device)
+    # for t in range(total_int_matrix.shape[0]):
+    #     mask[test_ids_ordered[t], col_range] = True 
+    #     votes = torch.sum(mask, dim=-1, dtype=torch.float) / test_ids_ordered.shape[-1]
+    #     commonset = torch.where(votes >= vote_ratio)[0]
+    #     if len(commonset) >= noise_size:
+    #         break
+    # scores = 1.0 - votes
+    # scores = torch.zeros(int_matrix.shape[0], dtype = torch.float, device = total_int_matrix.device)
+    # scores[commonset] = -1.0     
+    return scores    
+
 def median_matrix_score(int_matrix: torch.Tensor, **_) -> torch.Tensor:
     ''' 3-D tensor: train sample * module * infl sample ''' 
     scores = int_matrix.nanmedian(dim=(-2,-1))
@@ -292,6 +452,229 @@ def rank_matrix_score(int_matrix: torch.Tensor, *, rank_score_fn = mean_matrix_s
     scores = rank_score_fn(ranks)
     del ranks
     return scores
+
+from pyclustering.cluster.xmeans import xmeans
+from sklearn.metrics import silhouette_samples
+import warnings
+np.warnings = warnings
+
+import umap
+
+import matplotlib.pyplot as plt
+def draw_clusters(X, y, G, module_id = 0):
+
+    umap_model = umap.UMAP(n_neighbors=25, min_dist = 0.01, random_state=42)
+    X_umap = umap_model.fit_transform(X)
+
+    distinct_y = np.unique(y)
+
+    # colors = ['#03fcc2', '#ed91e4', '#03fcc2', '#ed91e4', '#f04354', '#696667']
+
+    legends = []
+    plt.ioff()
+    plt.clf()
+
+    for label_id, label in enumerate(distinct_y):
+
+        X0 = X_umap[(G == 0) & (y == label)]
+        X1 = X_umap[(G == 1) & (y == label)]
+        # color = colors[label_id]
+
+        h = plt.scatter(X0[:, 0], X0[:, 1], marker="o", s=10, alpha=0.5)
+        legends.append(f"Cluster {label}, clear")
+        plt.scatter(X1[:, 0], X1[:, 1], marker="x", s=20, alpha = 1, color=h.get_facecolor()[0])
+        legends.append(f"Cluster {label}, noise")
+    
+    plt.legend(legends)
+    plt.savefig("tmp.pdf")
+    plt.savefig(f"data/clusters/l-{module_id}.pdf")
+    pass
+
+def draw_clusters2(X1, y1, G1, X2, y2, G2, module_id = 0):
+
+    plt.ioff()
+    plt.clf()
+
+    fig, ax = plt.subplots(1, 2, figsize=(12, 6))
+
+    umap_model = umap.UMAP(n_neighbors=25, min_dist = 0.01, random_state=42)
+    X1_umap = umap_model.fit_transform(X1)
+
+    distinct_y = np.unique(y1)
+
+    legends = []
+    for label_id, label in enumerate(distinct_y):
+
+        xx0 = X1_umap[(G1 == 0) & (y1 == label)]
+        xx1 = X1_umap[(G1 == 1) & (y1 == label)]
+        # color = colors[label_id]
+
+        ax[0].scatter(xx0[:, 0], xx0[:, 1], marker="o", s=10, alpha=0.5)
+        legends.append(f"Cluster {label}, clear")
+        ax[0].scatter(xx1[:, 0], xx1[:, 1], marker="x", s=20, alpha = 1)
+        legends.append(f"Cluster {label}, noise")
+    
+    ax[0].legend(legends)
+
+    umap_model = umap.UMAP(n_neighbors=25, min_dist = 0.01, random_state=42)
+    X2_umap = umap_model.fit_transform(X2)
+
+    distinct_y = np.unique(y2)
+
+    legends = []
+    for label_id, label in enumerate(distinct_y):
+
+        xx0 = X2_umap[(G2 == 0) & (y2 == label)]
+        xx1 = X2_umap[(G2 == 1) & (y2 == label)]
+        # color = colors[label_id]
+
+        ax[1].scatter(xx0[:, 0], xx0[:, 1], marker="o", s=10, alpha=0.5)
+        legends.append(f"Cluster {label}, clear")
+        ax[1].scatter(xx1[:, 0], xx1[:, 1], marker="x", s=20, alpha = 1) # color=h.get_facecolor()[0])
+        legends.append(f"Cluster {label}, noise")
+    
+    ax[1].legend(legends)
+
+
+    plt.savefig("tmp.pdf")
+    plt.savefig(f"data/clusters/l-{module_id}.pdf")
+    plt.close(fig)
+    pass
+
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+
+def distance_to_centroid(X, _):
+    centroid = np.mean(X, axis = 0)
+    d = np.linalg.norm(X - centroid, axis=1)
+    max_d = np.max(d)
+    return 1 - d / max_d
+
+
+def cluster_matrix_score(int_matrix: torch.Tensor, *, noise_mask: torch.Tensor, 
+                         trainset_labels: torch.Tensor, inflset_labels: torch.Tensor, 
+                         measure_clusters = silhouette_samples, kmax = 4, **_):
+    ''' 3-D tensor: train sample * module * infl sample '''
+
+    int_matrix_X = int_matrix.float().cpu().numpy()
+    # same_class = trainset_labels[:, None] == inflset_labels[None, :]
+    labels = trainset_labels.cpu().numpy()
+    # labels = same_class.to(torch.int)
+    # labels[:, trainset_labels == 1] += 2
+    # labels = labels.cpu().numpy()
+    noise_mask_np = noise_mask.cpu().numpy()
+    scores = []
+    thr = 1350
+    noise_size = 900
+    ndrs = []
+    for module_id in range(int_matrix.shape[1]):
+        # random_state = np.random.randint(0, 100000)
+        module_int_matrix_X = int_matrix_X[:, module_id]
+        X_normalized = StandardScaler().fit_transform(module_int_matrix_X)
+        # X_normalized = module_int_matrix_X
+        # xmeans_instance = KMeans(n_clusters = kmax, random_state = random_state).fit(X_normalized)
+        # # xmeans_instance.process()
+        # # clusters = xmeans_instance.get_clusters()
+        # # labels = np.zeros(int_matrix.shape[0], dtype=int)
+        # # for cluster_id, smaple_ids in enumerate(clusters):
+        # #     labels[smaple_ids] = cluster_id
+        # labels = xmeans_instance.labels_
+
+
+        draw_clusters(X_normalized, labels, noise_mask_np, module_id = module_id)
+
+        scores_by_clusters = measure_clusters(X_normalized, labels)
+        idxs = np.argsort(scores_by_clusters)
+        start_noise_30 = noise_mask_np[idxs[:thr]].sum() / noise_size
+        end_noise_30 = noise_mask_np[idxs[-thr:]].sum() / noise_size
+        print(f"Module {module_id} start noise {round(start_noise_30 * 100)}, end noise {round(end_noise_30 * 100)}")
+        ndrs.append({"module_id": module_id, "start_noise_30": start_noise_30, "end_noise_30": end_noise_30})
+        scores.append(scores_by_clusters)
+
+    df = pd.DataFrame(ndrs)
+    df.to_csv("data/clusters/ndrs.csv")
+    mean_scores = np.mean(scores, axis = 0)
+    idxs = np.argsort(mean_scores)
+    start_noise_30 = noise_mask_np[idxs[:thr]].sum() / noise_size
+    end_noise_30 = noise_mask_np[idxs[-thr:]].sum() / noise_size
+    print(f"Total: start noise {round(start_noise_30 * 100)}, end noise {round(end_noise_30 * 100)}")
+
+    return mean_scores
+
+    # centers = xmeans_instance.get_centers()
+    # return clusters, centers
+
+
+def cluster_matrix_score2(int_matrix: torch.Tensor, *, noise_mask: torch.Tensor, 
+                         trainset_labels: torch.Tensor, inflset_labels: torch.Tensor, 
+                         measure_clusters = distance_to_centroid, kmax = 4, **_):
+    ''' 3-D tensor: train sample * module * infl sample '''
+
+    int_matrix_X = int_matrix.float().cpu().numpy()
+    train_labels = trainset_labels.cpu().numpy()
+    infl_labels = inflset_labels.cpu().numpy()
+    all_labels = np.unique(train_labels)
+    train_ids = []
+    infl_ids = []
+    for label in all_labels:
+        train_ids.append(np.where(train_labels == label)[0])
+        infl_ids.append(np.where(infl_labels == label)[0])
+    # same_class = trainset_labels[:, None] == inflset_labels[None, :]
+    # labels = same_class.to(torch.int)
+    # labels[:, trainset_labels == 1] += 2
+    # labels = labels.cpu().numpy()
+    noise_mask_np = noise_mask.cpu().numpy()
+    scores = []
+    thr = 1350
+    noise_size = 900
+    ndrs = []
+    for module_id in range(int_matrix.shape[1]):
+        # random_state = np.random.randint(0, 100000)
+        module_int_matrix_X = int_matrix_X[:, module_id]
+        X_normalized = StandardScaler().fit_transform(module_int_matrix_X)
+        # X_normalized = module_int_matrix_X
+        # xmeans_instance = KMeans(n_clusters = kmax, random_state = random_state).fit(X_normalized)
+        # # xmeans_instance.process()
+        # # clusters = xmeans_instance.get_clusters()
+        # # labels = np.zeros(int_matrix.shape[0], dtype=int)
+        # # for cluster_id, smaple_ids in enumerate(clusters):
+        # #     labels[smaple_ids] = cluster_id
+        # labels = xmeans_instance.labels_
+
+        X1 = X_normalized[train_ids[0]][:, infl_ids[0]]
+        y1 = train_labels[train_ids[0]]
+        G1 = noise_mask_np[train_ids[0]]
+
+        X2 = X_normalized[train_ids[1]][:, infl_ids[1]]
+        y2 = train_labels[train_ids[1]]
+        G2 = noise_mask_np[train_ids[1]]
+        all_scores_by_clusters = np.zeros(int_matrix_X.shape[0], dtype = float)
+
+        draw_clusters2(X1, y1, G1, X2, y2, G2, module_id = module_id)
+
+        scores_by_clusters = measure_clusters(X1, y1)
+        all_scores_by_clusters[train_ids[0]] = scores_by_clusters
+
+        scores_by_clusters = measure_clusters(X2, y2)
+        all_scores_by_clusters[train_ids[1]] = scores_by_clusters 
+
+        idxs = np.argsort(all_scores_by_clusters)
+        start_noise_30 = noise_mask_np[idxs[:thr]].sum() / noise_size
+        end_noise_30 = noise_mask_np[idxs[-thr:]].sum() / noise_size
+        print(f"Module {module_id} start noise {round(start_noise_30 * 100)}, end noise {round(end_noise_30 * 100)}")
+        ndrs.append({"module_id": module_id, "start_noise_30": start_noise_30, "end_noise_30": end_noise_30})
+        scores.append(all_scores_by_clusters)
+
+    df = pd.DataFrame(ndrs)
+    df.to_csv("data/clusters/ndrs.csv")
+    mean_scores = np.mean(scores, axis = 0)
+    idxs = np.argsort(mean_scores)
+    start_noise_30 = noise_mask_np[idxs[:thr]].sum() / noise_size
+    end_noise_30 = noise_mask_np[idxs[-thr:]].sum() / noise_size
+    print(f"Total: start noise {round(start_noise_30 * 100)}, end noise {round(end_noise_30 * 100)}")
+
+    return mean_scores
+
 
 def dir_matrix_score(int_matrix: torch.Tensor, **_) -> torch.Tensor:
     ''' 3-D tensor: train sample * module * infl sample '''
@@ -1141,7 +1524,7 @@ def compute_ndr_metrics_table(base_dir_path: str, task='qnli',
                                     infl_methods = ['hf'],
                                     agg_methods: dict[str, callable] = {"mean": mean_matrix_score},
                                     include_total = True,
-                                    m_prefix = "m_b", i_prefix="i_b"):
+                                    m_prefix = "m_bl", i_prefix="i_bl"):
 
     agg_method_names = list(agg_methods.keys())
     module_groups_patterns = {name: re.compile(pattern) for name, pattern in module_groups_regex.items()}
@@ -1196,8 +1579,8 @@ def compute_ndr_metrics_table(base_dir_path: str, task='qnli',
             del group_module_ids
 
         if include_total:
-            module_interactions.append(all_interactions)
-            module_and_group_names.append('total')
+            module_interactions.insert(0, all_interactions)
+            module_and_group_names.insert(0, 'total')
         
         noise_list = noise_list_dict[run_id_str]
         num_noise = sum(noise_list)
@@ -1482,7 +1865,7 @@ def draw_ft2_metric3(infile: str, outfile: str, metric = 'accuracy', method_dict
 
 
 # RQ1: what checkpoint it is better to use with infl methods to detect noise 
-def get_df_from_file(metric_file: str, suffix):
+def get_df_from_file(metric_file: str, module_groups):    
 
     # file_name = os.path.basename(metric_file).split(".")[0]
     with open(metric_file, 'r') as f:
@@ -1516,28 +1899,49 @@ def get_df_from_file(metric_file: str, suffix):
         filtered = r["filtered"]
 
         noise_curve = r["ndr_curve"]
-        index_30 = round(0.3 * len(noise_curve))
-        noise_30  = noise_curve[index_30]
         num_noise = round(0.2 * len(noise_curve))
         ideal_area = num_noise / 2 + (len(noise_curve) - num_noise)        
         auc_ndr2 = sum((noise_curve[i] + noise_curve[i + 1]) / 2 for i in range(len(noise_curve) - 1)) / ideal_area
 
-        assert np.allclose(auc_ndr, auc_ndr2, atol=1e-3)
-        assert np.allclose(noise_30, filtered, atol=1e-3)
-
         task = r["config"]["task"]
         infl_method = r["config"]["infl_method"]
-        seed0 = r["config"]["seed"]
-        seed1 = r["config"]["seed2"]
+        seed = r["config"]["seed"]
+        seed2 = r["config"]["seed2"]
+        total_seed = seed + 100 * seed2
+        filter_perc = r["config"]["filter_perc"]
+
+        index_30 = round(filter_perc * len(noise_curve))
+        noise_30  = noise_curve[index_30]
+
+        assert np.allclose(auc_ndr, auc_ndr2, atol=1e-2)
+        assert np.allclose(noise_30, filtered, atol=1e-2)
 
         if infl_method == "rand":
-            rand_accuracies[(suffix, task, seed0, seed1)] = (best_accuracy, best_infl_accuracy)
+            rand_accuracies[(task, filter_perc, total_seed)] = (best_accuracy, best_infl_accuracy)
 
-        row = {"checkpoint": suffix,
+        module_name = r["config"]["module_name"]
+        modules_pattern = module_groups.get(module_name, None)
+
+        if modules_pattern is None:
+            cancel = 0
+        else:
+            cancel_map = r["first_finetune"]["cancel_norm"]
+
+            cancel = 0
+            cancel_count = 0
+            for m in cancel_map.keys():
+                if modules_pattern.match(m):
+                    cancel += cancel_map[m]
+                    cancel_count ++ 1 
+            
+            cancel = 0 if cancel_count == 0 else (cancel / cancel_count)
+
+        row = {
                "task": task,
+               "filter_perc": filter_perc,
                "infl_method": infl_method,
                "agg_method": r["config"]["agg_method"],
-               "module": r["config"]["module_name"],
+               "module": module_name,
                
                "best_accuracy_delta": accuracy_delta,
                "best_infl_accuracy_delta": infl_accuracy_delta,
@@ -1554,15 +1958,15 @@ def get_df_from_file(metric_file: str, suffix):
 
                 "infl_loss_0": min_infl_loss0,
                 'infl_loss_1': min_infl_loss,
+                "cancel": cancel,
 
-               "seed0": seed0,
-               "seed1": seed1,
+               "seed": total_seed
 
                }
         rows.append(row)
 
     for r in rows:
-        key = (r["checkpoint"], r["task"], r["seed0"], r["seed1"])
+        key = (r["task"], r["filter_perc"], r["seed"])
         rand_accuracy, rand_infl_accuracy = rand_accuracies[key]
         accuracy_rand_delta = r["best_accuracy_1"] - rand_accuracy
         infl_accuracy_rand_delta = r["best_infl_accuracy_1"] - rand_infl_accuracy
@@ -1573,8 +1977,8 @@ def get_df_from_file(metric_file: str, suffix):
 
     return df
 
-def get_agg_df(df: DataFrame, key_columns = ['checkpoint', 'task', 'infl_method', 'agg_method', 'module'],
-                drop_columns=['seed0', 'seed1'], selected_columns=None, agg_types = ['mean', 'std']):
+def get_agg_df(df: DataFrame, key_columns = ['task', 'filter_perc', 'infl_method', 'agg_method', 'module'],
+                drop_columns=['seed'], selected_columns=None, agg_types = ['mean', 'std']):
     if selected_columns is None:
         grouped = df.drop(columns=drop_columns).groupby(key_columns)
     else:
@@ -1589,21 +1993,19 @@ def get_agg_df(df: DataFrame, key_columns = ['checkpoint', 'task', 'infl_method'
     aggregated_sorted = aggregated_sorted[other_columns + std_columns]    
     return aggregated_sorted
 
-def get_all_df(base_path = "data/roberta-2", datasets = ["mrpc", "qnli", "sst2", "qqp"],
-                checkpoints = ["b", "l", "bl"],
-                tmp_file = "tmp.pkl"):
-    if os.path.exists(tmp_file):
-        df1 = pd.read_pickle(tmp_file)
-    else:
-        plain_dataframes = []
-        for dataset in datasets:
-            for checkpoint in checkpoints:
-                file = os.path.join(base_path, f"{dataset}-{checkpoint}.jsonlist")
-                df = get_df_from_file(file, checkpoint)
-                plain_dataframes.append(df)
-        
-        df1 = pd.concat(plain_dataframes, ignore_index=True)
-        df1.to_pickle(tmp_file)
+def get_all_df(base_path = "data/roberta/filter-30", datasets = ["mrpc", "qnli", "sst2", "qqp", "cola", "mnli", "rte", "stsb"],
+                tmp_file = "tmp.pkl", module_groups = {}):
+    # if os.path.exists(tmp_file):
+    #     df1 = pd.read_pickle(tmp_file)
+    # else:
+    plain_dataframes = []
+    for dataset in datasets:
+        file = os.path.join(base_path, f"{dataset}.jsonlist")
+        df = get_df_from_file(file, module_groups)
+        plain_dataframes.append(df)
+    
+    df1 = pd.concat(plain_dataframes, ignore_index=True)
+    # df1.to_pickle(tmp_file)
     return df1
 
 def rank_checkpoints(base_path = "data/roberta-2", metric = "noise_30",
@@ -1611,11 +2013,11 @@ def rank_checkpoints(base_path = "data/roberta-2", metric = "noise_30",
                         checkpoints = ["b", "l", "bl"]):
     df1 = get_all_df(base_path = base_path, datasets = datasets,
                         checkpoints = checkpoints)
-    key_columns = ["checkpoint", "task", "infl_method", "agg_method", "module", "seed0", "seed1"]
+    key_columns = ["checkpoint", "task", "infl_method", "agg_method", "module", "seed"]
 
     df2 = df1[(df1["agg_method"] != "")]
     df3 = df2[key_columns + [metric]]
-    df4 = df3.pivot(index=["task", "infl_method", "agg_method", "module", "seed0", "seed1"], columns="checkpoint", values=metric)
+    df4 = df3.pivot(index=["task", "infl_method", "agg_method", "module", "seed"], columns="checkpoint", values=metric)
     df4 = df4[~df4.isna().any(axis=1)]
     df5: DataFrame = df4[df4[checkpoints].gt(0).any(axis=1)]
 
@@ -1678,11 +2080,315 @@ def estimate_ndr(folder:str, prefix: str):
     df = df.sort_values(by='ndr_30_mean', ascending=False)
     pass 
 
+def create_dataset_table():
+
+    with open("data/roberta/groups.json", "r") as f:
+        module_patterns = json.load(f)
+        
+    module_patterns = {m: re.compile(p) for m, p in module_patterns.items()}
+
+    datasets = ["mrpc", "qnli", "sst2", "qqp", "cola", "mnli", "rte", "stsb"]
+    for dataset in datasets:    
+        df = get_all_df(datasets = [dataset], module_groups=module_patterns)
+        sorted_df = get_agg_df(df)
+        # sorted_df2 = sorted_df.reset_index()
+
+        sorted_df2 = sorted_df.sort_values(by="best_accuracy_1_mean", ascending=False)
+
+        columns_to_include = ["best_accuracy_1", "best_infl_accuracy_1", "accuracy_rand_delta", "noise_30", "auc_ndr", "infl_loss_delta", "cancel", "logits_change"]
+        rows = []
+        for row in sorted_df2.to_dict(orient="records"):
+            new_row = []
+            infl_method = row["infl_method"]
+            module = row["module"]
+            new_row.append(infl_method)
+            new_row.append(module)
+            for c in columns_to_include:
+                v_mean = row[c + "_mean"]
+                v_std = row[c + "_std"]
+                if c in ["best_accuracy_1", "best_infl_accuracy_1", "accuracy_rand_delta", "noise_30", "auc_ndr"]:
+                    v_mean = round(v_mean * 100) 
+                    v_std = round(v_std * 100)
+                else:
+                    if v_mean == 0 and c == "cancel":
+                        v_mean = ""
+                        v_std = "0"
+                    else:
+                        v_mean = round(v_mean * 100) / 100
+                        v_mean = str(v_mean)
+                        if v_mean.startswith("0."):
+                            v_mean = "." + v_mean[2:]
+                        if v_mean.startswith("-0."):
+                            v_mean = "-." + v_mean[3:]
+                        if  v_std == 0:
+                            v_std = "0"
+                        else:
+                            v_std = round(v_std * 100) / 100
+                            v_std = str(v_std)
+                            if v_std.startswith("0."):
+                                v_std = "." + v_std[2:] 
+                if (v_std == 0) or (v_std == "0"):
+                    new_row.append(f"{v_mean}")
+                else:
+                    new_row.append(f"{v_mean} $\pm$ {v_std}")
+            rows.append(new_row)
+
+        column_names = ["method", "layers", "$Acc_t$", "$Acc_v$", "$\Delta Acc^{rnd}_t$", "$NDR_{30}$", "$AUC_{NDR}$", "$\Delta loss_v$", "Cancel", "$\Delta logits_t $"]
+        with open(f"{dataset}.tex", "w") as stats_file:
+            s = tabulate(rows, headers = column_names, showindex=False, tablefmt="latex", floatfmt=".3f")
+            s = s.replace("\\textbackslash{}", "\\").replace("\\$", "$").replace("hf\_we\_topk\_10", "$hf^{10}_{we}$").replace("hf\_we\_", "$hf_{we}$").replace("\\_", "_").replace("\{", "{").replace("\}", "}").replace("\^{}", "^").replace("llllllllll", "ll|cccccccc")
+            print(s, file = stats_file)
+    pass
+
+def run_friedman_tests(metric_name: str = "best_accuracy_1",
+                        out_folder = "data/roberta/filter-30"):
+
+    datasets = ["qnli", "mrpc", "sst2", "qqp", "cola", "mnli", "rte", "stsb"]
+
+    all_df = get_all_df(datasets = datasets)
+
+    for d in datasets:
+        df = all_df[all_df['task'] == d].pivot(index=["infl_method", "agg_method", "module"], columns=["seed"], values=metric_name)
+        df["rank"] = df.rank(axis=0, ascending=False, method="average").mean(axis=1)
+        df = df.sort_values(by="rank").drop(columns=["rank"])
+        methods = [ m if l == "" else f"{m}, {l}" for m, _, l in df.index.to_list()]
+
+        stats_data = df.to_numpy()
+        # stats_data = np.hstack((stats_data, stats_data, stats_data))
+
+        friedman_res = sci_stats.friedmanchisquare(*stats_data)
+
+        nemenyi_res = sci_posthocs.posthoc_nemenyi_friedman(stats_data.T) 
+        print(f"\n----------------------------------")
+        print(f"Friedman {d} {metric_name}: {friedman_res}")
+        from tabulate import tabulate
+        rows = []
+        for i in range(len(methods)):
+            row = []
+            row.append(methods[i])
+            for j in range(len(methods)):
+                pvalue = round(nemenyi_res[i][j] * 100) / 100
+                if pvalue <= 0.05:
+                    row.append(f"\\textbf{{{pvalue}}}")
+                else:
+                    row.append(str(pvalue))
+            rows.append(row)
+
+        with open(f"{out_folder}/{metric_name}-{d}-friedman.tex", "w") as stats_file:
+            s = tabulate(rows, headers=["", *methods], showindex=False, tablefmt="latex", numalign="left", stralign="left")
+            s = s.replace("\\textbackslash{}", "\\").replace("\\$", "$").replace("hf\_we\_topk\_10", "hf$^{10}_{we}$").replace("hf\_we\_", "hf$_{we}$").replace("\\_", "_").replace("\{", "{").replace("\}", "}").replace("\^{}", "^").replace("lllllllllllllllllllllllll", "l|cccccccccccccccccccccccc").replace("rand", "\\hline rand")
+            print(f"% Friedman {d} {metric_name}: {friedman_res}", file = stats_file)
+            print(s, file = stats_file)
+
+        # print(tabulate(rows, , tablefmt="grid", numalign="center", stralign="center"))
+        pass 
+    pass
+
+def create_metric_table(metric_name: str = "best_accuracy_1", prec = 2, 
+                        out_folder = "data/roberta/filter-30",
+                        highlight_max = True, ds_ranks = False, mul = 100):
+    with open("data/roberta/groups.json", "r") as f:
+        module_patterns = json.load(f)
+        
+    module_patterns = {m: re.compile(p) for m, p in module_patterns.items()}
+
+    datasets = ["qnli", "mrpc", "sst2", "qqp" ] #, "cola", "mnli", "rte", "stsb"]
+
+    all_df = get_all_df(base_path = out_folder, datasets = datasets, module_groups=module_patterns)
+
+    metrics_per_ds = all_df.pivot(index=["infl_method", "agg_method", "module"], columns=["task", "seed"], values=metric_name)
+
+    idx = pd.MultiIndex.from_tuples(metrics_per_ds.columns)
+
+    metrics_per_ds.columns = idx
+    # metrics_per_ds = metrics_per_ds.round(prec)
+
+    # ranks = metrics_per_ds.round(prec).rank(axis = 0, ascending=False, method="average") # method="dense")
+    ranks = metrics_per_ds.rank(axis = 0, ascending=False, method="average") # method="dense")
+
+    suffix = ""
+    if ds_ranks:
+        # ranks.columns = idx
+        # metrics_per_ds = ranks.groupby(level=0, axis=1).mean()
+        metrics_per_ds = ranks
+        suffix = "-rank"
+
+
+    metrics_per_ds['rank'] = ranks.mean(axis=1).round(1)
+    metrics_per_ds['rank_std'] = ranks.std(axis=1).round(1)
+
+    # ds_ranks = metrics_per_ds.groupby(level=1, axis=1).rank(axis = 1, ascending=False, method="average")
+    # pass
+
+    metrics_per_ds = metrics_per_ds.sort_values(by=['rank', 'rank_std'], ascending=[True, True])
+    metrics_per_ds.to_csv(f"{out_folder}/{metric_name}{suffix}-all.csv")
+
+    metric_by_ds_mean = metrics_per_ds.groupby(level=0, axis=1).mean().round(prec)
+    metric_by_ds_std = metrics_per_ds.drop(columns=["rank", "rank_std"]).groupby(level=0, axis=1).std().round(prec + 1)
+    metric_by_ds_std.columns = [c + "_std" for c in metric_by_ds_std.columns]
+    metric_by_ds = pd.merge(metric_by_ds_mean, metric_by_ds_std, left_index=True, right_index=True)
+    metric_by_ds = metric_by_ds[[*[de for d in datasets for de in [d, d + "_std"]], "rank", "rank_std"]]
+    metric_by_ds.to_csv(f"{out_folder}/{metric_name}{suffix}-avg.csv")
+
+    filtered_df = metric_by_ds.loc[metric_by_ds.index.get_level_values('infl_method') != 'denoise']
+    if highlight_max:
+        values_to_highlight = filtered_df[datasets].to_numpy().max(axis=0)
+    else:
+        values_to_highlight = filtered_df[datasets].to_numpy().min(axis=0)
+
+    rows = []
+    for row in metric_by_ds.reset_index().to_dict(orient="records"):
+        new_row = {}
+        method = row["infl_method"]
+        layer = row["module"]
+        new_row["method"] = method 
+        new_row["layer"] = layer 
+        for did, d in enumerate([*datasets, "rank"]):
+            should_highlight = False
+            if d == "rank":
+                m = round(row[d] * 100) / 100
+                m_std = round(row[d + "_std"] * 100) / 100
+            else:
+                if method != "denoise":
+                    should_highlight = row[d] == values_to_highlight[did]
+                m = round(row[d] * 100 * mul) / 100
+                m_std = round(row[d + "_std"] * 100 * mul) / 100
+            m = str(m).rstrip("0").rstrip(".").lstrip("0").replace("-0.", "-.")
+            m_std = str(m_std).rstrip("0").rstrip(".").lstrip("0")
+
+            if should_highlight:
+                if m_std == "":
+                    new_row[d] = f"\\textbf{{{m}}}"
+                else:
+                    new_row[d] = f"\\textbf{{{m}}} $\pm$ {m_std}"
+            else:
+                if m_std == "":
+                    new_row[d] = m
+                else:
+                    new_row[d] = f"{m} $\pm$ {m_std}"
+        rows.append(new_row)
+
+    with open(f"{out_folder}/{metric_name}{suffix}-avg.tex", "w") as stats_file:
+        s = tabulate(rows, headers = "keys", showindex=False, tablefmt="latex")
+        s = s.replace("\\textbackslash{}", "\\").replace("\\$", "$").replace("hf\_we\_topk\_10", "hf$^{10}_{we}$").replace("hf\_we\_", "hf$_{we}$").replace("\\_", "_").replace("\{", "{").replace("\}", "}").replace("\^{}", "^").replace("lllllllllll", "ll|ccccccccc").replace("rand", "\\hline rand")
+        print(s, file = stats_file)
+
+    pass
+
+    # ranks.columns = idx
+
+    # averaged_ranks = ranks.groupby(level=0, axis=1).mean()
+
+    # ranks.to_csv("ranks.csv")
+
+    # averaged_ranks.to_csv("avg_ranks_ds.csv")
+
+    # averaged_ranks_all.to_csv("avg_ranks_all.csv")
+
+    # pass
+
+
+    # distinct_method_layer = np.unique(all_df[["infl_method", "module", "seed"]].to_numpy().astype(str), axis=0)
+    
+    # methods_values_per_seed = {}
+    # seeds = list(range(5))
+    # for method_layer in distinct_method_layer:
+    #     method = method_layer[0]
+    #     layer = method_layer[1]
+    #     seed = method_layer[2]
+    #     seed_values = methods_values_per_seed.setdefault(seed, [])
+    #     for dataset in datasets:    
+    #         dataset_dfs[dataset] = all_df[all_df["task"] == dataset][metric_name].values[0]
+    
+    # for dataset_name, df in dataset_dfs.items():
+    #     for row in df[["infl_method", "module", metric_name + "_mean", metric_name + "_std"]].to_dict(orient="records"):
+    #         method = row["infl_method"]
+    #         layer = row["module"]
+    #         mean = row[metric_name + "_mean"]
+    #         std = row[metric_name + "_std"]
+    #         ds_dfs = methods_dfs.setdefault((method, layer), {})
+    #         ds_dfs[dataset_name] = (mean, std)
+
+    # methods_dfs_plain = []
+    # for (method, layers), ds_metrics in methods_dfs.items():
+    #     methods_dfs_plain.append({
+    #         "method": method, "layers": layers, **ds_metrics
+    #     })
+    # df = DataFrame(methods_dfs_plain).set_index(["method", "layers"])
+    # ranks = df.rank(axis = 0, ascending=False)
+    pass
+
+
+    # rows = [] 
+    # for dataset_name, df in dataset_dfs.items():
+
+    #     row = {
+    #         "method": df["infl_method"],
+    #         "layer": df["module"]
+    #     }
+
+
+    #     sorted_df2 = sorted_df.sort_values(by="best_accuracy_1_mean", ascending=False)
+
+    #     columns_to_include = ["best_accuracy_1", "best_infl_accuracy_1", "accuracy_rand_delta", "noise_30", "auc_ndr", "infl_loss_delta", "cancel", "logits_change"]
+    #     rows = []
+    #     for row in sorted_df2.to_dict(orient="records"):
+    #         new_row = []
+    #         infl_method = row["infl_method"]
+    #         module = row["module"]
+    #         new_row.append(infl_method)
+    #         new_row.append(module)
+    #         for c in columns_to_include:
+    #             v_mean = row[c + "_mean"]
+    #             v_std = row[c + "_std"]
+    #             if c in ["best_accuracy_1", "best_infl_accuracy_1", "accuracy_rand_delta", "noise_30", "auc_ndr"]:
+    #                 v_mean = round(v_mean * 100) 
+    #                 v_std = round(v_std * 100)
+    #             else:
+    #                 if v_mean == 0 and c == "cancel":
+    #                     v_mean = ""
+    #                     v_std = "0"
+    #                 else:
+    #                     v_mean = round(v_mean * 100) / 100
+    #                     v_mean = str(v_mean)
+    #                     if v_mean.startswith("0."):
+    #                         v_mean = "." + v_mean[2:]
+    #                     if v_mean.startswith("-0."):
+    #                         v_mean = "-." + v_mean[3:]
+    #                     if  v_std == 0:
+    #                         v_std = "0"
+    #                     else:
+    #                         v_std = round(v_std * 100) / 100
+    #                         v_std = str(v_std)
+    #                         if v_std.startswith("0."):
+    #                             v_std = "." + v_std[2:] 
+    #             if (v_std == 0) or (v_std == "0"):
+    #                 new_row.append(f"{v_mean}")
+    #             else:
+    #                 new_row.append(f"{v_mean} $\pm$ {v_std}")
+    #         rows.append(new_row)
+
+    #     column_names = ["method", "layers", "$Acc_t$", "$Acc_v$", "$\Delta Acc^{rnd}_t$", "$NDR_{30}$", "$AUC_{NDR}$", "$\Delta loss_v$", "Cancel", "$\Delta logits_t $"]
+    #     with open(f"{dataset}.tex", "w") as stats_file:
+    #         s = tabulate(rows, headers = column_names, showindex=False, tablefmt="latex", floatfmt=".3f")
+    #         s = s.replace("\\textbackslash{}", "\\").replace("\\$", "$").replace("hf\_we\_topk\_10", "$hf^{10}_{we}$").replace("hf\_we\_", "$hf_{we}$").replace("\\_", "_").replace("\{", "{").replace("\}", "}").replace("\^{}", "^").replace("llllllllll", "ll|cccccccc")
+    #         print(s, file = stats_file)
+    pass
+
+
 if __name__ == "__main__":
+
+    # create_metric_table(metric_name="noise_30", ds_ranks=False, mul = 100, highlight_max = True, out_folder="data/llama")
+    # pass
+    create_metric_table(metric_name="noise_30", ds_ranks=False, mul = 100, highlight_max = True, out_folder="data/llama-0")
+    pass
+    # run_friedman_tests(metric_name="best_accuracy_1")
+    # run_friedman_tests(metric_name="noise_30")
+
     # estimate_ndr("./data/roberta-2/sst2", "s_bl_")
 
-    rank_checkpoints(metric = "infl_accuracy_rand_delta")
-    pass
+    # rank_checkpoints(metric = "infl_accuracy_rand_delta")
+    # pass
 
     # draw_ft2_metric3('./data/mistral/sst2.jsonlist',
     #                  './data/mistral/sst2-acc-hf.pdf',
@@ -2643,8 +3349,9 @@ if __name__ == "__main__":
     # pass
 
 
-    # base_path = './data/llama'
+    base_path = './data/roberta'
     # tasks = ['qnli', 'mrpc', 'sst2', 'qqp']
+    tasks = ['qqp']
 
     # module_groups_regex = { "WE": ".*\\.embed_tokens\\..*",     
     #                         "00-03": ".*\\.layers\\.([0-3])\\..*\\.lora_(A|B)\\..*",
@@ -2664,31 +3371,68 @@ if __name__ == "__main__":
     #                         "CL": ".*\\.score\\..*"
     #                      }
 
-    # infl_methods = [
-    #     'hf',
-    #     'cos',
-    #     'datainf',
-    #     'hf_we_', 
-    #     'hf_we_topk_10',
-    # ]
-    # agg_methods = {
-    #     "rank": rank_matrix_score, 
-    #     "mean": mean_matrix_score, 
-    #     "mean_10": partial(mean_matrix_score, trim_ratio=0.1),
-    #     "mean_50": partial(mean_matrix_score, trim_ratio=0.5),
-    #     "dir": dir_matrix_score,
-    # }
-    # for task in tasks:
-    #     df = compute_ndr_metrics_table(base_path, task=task,
-    #                                     module_groups_regex = module_groups_regex,
-    #                                     agg_methods=agg_methods,
-    #                                     infl_methods = infl_methods)
-    #     print(df)
-    #     pass 
-    #     output_table(df, base_path, task)
-    #     pass
+    module_groups_regex = { "WE": ".*\\.word_embeddings\\..*",
+                            
+                            "00-05": ".*\\.layer\\.([0-5])\\..*\\.lora_(A|B)\\..*",
+                            "06-11": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_(A|B)\\..*",
+                            "12-17": ".*\\.layer\\.(1[2-7])\\..*\\.lora_(A|B)\\..*",
+                            "18-23": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_(A|B)\\..*",
 
-    # pass
+                            "00-05 A": ".*\\.layer\\.([0-5])\\..*\\.lora_A\\..*",
+                            "06-11 A": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_A\\..*",
+                            "12-17 A": ".*\\.layer\\.(1[2-7])\\..*\\.lora_A\\..*",
+                            "18-23 A": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_A\\..*",
+
+                            "00-05 B": ".*\\.layer\\.([0-5])\\..*\\.lora_B\\..*",
+                            "06-11 B": ".*\\.layer\\.([6-9]|1[0-1])\\..*\\.lora_B\\..*",
+                            "12-17 B": ".*\\.layer\\.(1[2-7])\\..*\\.lora_B\\..*",
+                            "18-23 B": ".*\\.layer\\.(1[8-9]|2[0-3])\\..*\\.lora_B\\..*",                            
+
+                            "CL": ".*\\.classifier\\..*",
+                         }    
+
+    infl_methods = [
+        'hf',
+        'cos',
+        'datainf',
+        'hf_we_', 
+        'hf_we_topk_10',
+    ]
+    agg_methods = {
+        "rank": rank_matrix_score, 
+        "mean": mean_matrix_score,
+        "pareto": pareto_matrix_score,
+        # "dir": dir_matrix_score,
+        # "commonset-20": partial(commonset_matrix_score, vote_ratio = 0.2),
+        # "commonsubset-40": partial(commonsubset_matrix_score, vote_ratio = 0.4),
+        # "csmi": partial(csmi_matrix_score, vote_ratio = 0.5, descending = False)
+
+
+        # "mean_10": partial(mean_matrix_score, trim_ratio=0.1),
+        # "mean_50": partial(mean_matrix_score, trim_ratio=0.5),
+        # "commonset1": partial(commonset_matrix_score, vote_ratio = 0.1),
+        # "commonset-80": partial(commonset_matrix_score, vote_ratio = 0.8),
+        # "commonset3": partial(commonset_matrix_score, vote_ratio = 0.3),
+        # "commonset4": partial(commonset_matrix_score, vote_ratio = 0.4),
+        # "commonsubset1": partial(commonsubset_matrix_score, vote_ratio = 0.1, descending = False),
+        # "commonsubset2": partial(commonsubset_matrix_score, vote_ratio = 0.2, descending = False),
+        # "commonsubset3": partial(commonsubset_matrix_score, vote_ratio = 0.3, descending = False),
+        # "commonsubset-60": partial(commonsubset_matrix_score, vote_ratio = 0.6, descending = False),
+        # "commonsubset-40r": partial(commonsubset_matrix_score, vote_ratio = 0.4, same_class = True, descending = True),
+        # "commonsubset-40rr": partial(commonsubset_matrix_score, vote_ratio = 0.4, same_class = True, descending = False),
+        # "silhouette": cluster_matrix_score
+    }
+    for task in tasks:
+        df = compute_ndr_metrics_table(base_path, task=task,
+                                        module_groups_regex = module_groups_regex,
+                                        agg_methods=agg_methods,
+                                        infl_methods = infl_methods)
+        print(df)
+        pass 
+        output_table(df, base_path, task)
+        pass
+
+    pass
         
 
     # draw_ft2_metric3('./data/llama/sst2.jsonlist',
