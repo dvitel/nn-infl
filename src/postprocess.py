@@ -1479,7 +1479,7 @@ def compute_ndr_metrics_table(base_dir_path: str, task='qnli',
                                     group_file: str = "./groups.json",
                                     infl_methods = ['hf'],
                                     agg_method_names: list[str] = ["mean"],
-                                    include_total = True, filter_perc = 0.3,
+                                    include_total = True, levels = [30],
                                     m_prefix = "m_bl", i_prefix="i_bl", ndr_prefix = "ndr_bl",
                                     save_df = True, device = "cuda"):
 
@@ -1493,8 +1493,8 @@ def compute_ndr_metrics_table(base_dir_path: str, task='qnli',
 
     task_in_dir = os.path.join(base_dir_path, task)
 
-    auc_ndr_by_infl = defaultdict(list) # key is (infl_method, agg_method, nn_module), value is list of auc roc scores
-    f30_score_by_infl = defaultdict(list) # key is (infl_method, agg_method, nn_module), value is filtered noise in first 30 percent
+    metric_by_method = defaultdict(list) # key is (infl_method, agg_method, nn_module), value is list of dict of metrics
+    # f30_score_by_infl = defaultdict(list) # key is (infl_method, agg_method, nn_module), value is filtered noise in first 30 percent
     # curves_by_methods_and_layer = defaultdict(list) # key is (infl_method, agg_method, nn_module), value is list of lists of agg_method filtering scores
 
     noise_list_dict, trainset_labels_dict, inflset_labels_dict = load_ds_info(task_in_dir)
@@ -1547,7 +1547,8 @@ def compute_ndr_metrics_table(base_dir_path: str, task='qnli',
         noise_list = noise_list_dict[run_id_str]
         num_noise = sum(noise_list)
         num_clean = len(noise_list) - num_noise
-        first_30_idx = round(filter_perc * len(noise_list))
+        filter_idxs = torch.tensor([ round(level * len(noise_list) / 100) for level in levels], device = device)
+        # first_30_idx = round(filter_perc * len(noise_list))
         ideal_area = num_noise / 2 + num_clean
 
         noise_mask = torch.tensor(noise_list, device = device)
@@ -1581,17 +1582,17 @@ def compute_ndr_metrics_table(base_dir_path: str, task='qnli',
         auc_ndrs = noise_detection_curves.sum(dim = -1) 
         auc_ndrs /= ideal_area
 
-        first_30 = noise_detection_curves[:, :, first_30_idx]
+        ndr_at_levels = noise_detection_curves[:, :, filter_idxs]
 
         auc_ndrs_cpu = auc_ndrs.cpu()
-        first_30_cpu = first_30.cpu()
-        del auc_ndrs, first_30, noise_detection_curves, scores, train_ids
+        ndr_at_levels_cpu = ndr_at_levels.cpu()
+        del auc_ndrs, ndr_at_levels, noise_detection_curves, scores, train_ids
 
         for agg_method_id, agg_method_name in enumerate(agg_method_names):
             for module_id, module_name in enumerate(module_and_group_names):
-                auc_ndr_by_infl[(infl_method, agg_method_name, module_name)].append(auc_ndrs_cpu[agg_method_id, module_id].item())
-                f30_score_by_infl[(infl_method, agg_method_name, module_name)].append(first_30_cpu[agg_method_id, module_id].item())
-                # curves_by_methods_and_layer[(infl_method, agg_method, module_name)].append(noise_perc_curve)
+                one_metrics = {level: ndr_at_levels_cpu[agg_method_id, module_id, level_i].item()  for level_i, level in enumerate(levels) }
+                one_metrics["auc_ndr"] = auc_ndrs_cpu[agg_method_id, module_id].item()
+                metric_by_method[(infl_method, agg_method_name, module_name)].append(one_metrics)
         torch.cuda.empty_cache() 
 
     # first_30_mean_std = {key: (np.mean(first_30_values), np.std(first_30_values)) for key, first_30_values in f30_score_by_infl.items() }
@@ -1604,14 +1605,14 @@ def compute_ndr_metrics_table(base_dir_path: str, task='qnli',
 
     rows = []
     # for sk in sorted_method_keys:
-    for key, first_30_values in f30_score_by_infl.items():
+    for key, metrics_list_of_dict in metric_by_method.items():
         infl_method, agg_method_name, module_name = key
         if module_name in module_groups_patterns or module_name == 'total':
-            module_layer, module_simple_name = module_name, "*"
+            module_layer, module_simple_name = module_name, "all"
         else:
             module_layer, module_simple_name = get_simple_module_and_layer_name(module_name)
-        for run_id, first_30 in enumerate(first_30_values):
-            auc_ndr = auc_ndr_by_infl[key][run_id]
+        for run_id, metrics_dict in enumerate(metrics_list_of_dict):
+            # auc_ndr = auc_ndr_by_infl[key][run_id]
             # f30_mean, f30_std = first_30_mean_std[sk]
             # auc_ndr_mean, auc_ndr_std = auc_rocs_mean_std[sk]
             # f30_rank = first_30_ranks[sk]
@@ -1622,13 +1623,12 @@ def compute_ndr_metrics_table(base_dir_path: str, task='qnli',
                 "agg": agg_method_name,
                 "layer": module_layer,
                 "module": module_simple_name,
-                "f30": first_30,
-                "auc_ndr": auc_ndr,
-                "run_id": run_id
+                "run_id": run_id,
+                **metrics_dict
             }
             rows.append(row_data)
 
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows).set_index(["task", "infl", "agg", "layer", "module", "run_id"])    
 
     if save_df:
         outfile = os.path.join(base_dir_path, f"{ndr_prefix}_{task}.pcl")
@@ -1638,13 +1638,13 @@ def compute_ndr_metrics_table(base_dir_path: str, task='qnli',
     return df
 
 def process_ndr_table(base_path: str, tasks: list[str], output_ranks = False, with_row_id = False,
-                        metric_name = "f30", ndr_prefix = "ndr_bl"): 
+                        metric_name = 30, ndr_prefix = "ndr_bl"): 
     #NOTE: metric_name in ["f30", "auc_ndr"]):
 
     dfs = [ pd.read_pickle(os.path.join(base_path, f"{ndr_prefix}_{task}.pcl")) for task in tasks ]
-    df = pd.concat(dfs, ignore_index=True)
+    df = pd.concat(dfs, ignore_index=False)
 
-    metric_df = df.pivot(index=["infl", "agg", "layer", "module"], columns=["task", "run_id"], values=[metric_name])
+    metric_df = df.reset_index().pivot(index=["infl", "agg", "layer", "module"], columns=["task", "run_id"], values=[metric_name])
 
     ranks = metric_df.rank(axis = 0, ascending=False, method="average")
     
@@ -1704,12 +1704,121 @@ def process_ndr_table(base_path: str, tasks: list[str], output_ranks = False, wi
                     new_row[d] = f"{m} $\pm$ {m_std}"
         rows.append(new_row)
 
-    with open(f"{base_path}/{metric_name}{suffix}-avg.tex", "w") as stats_file:
+    with open(f"{base_path}/ndr-{metric_name}{suffix}-avg.tex", "w") as stats_file:
         s = tabulate(rows, headers = "keys", showindex=False, tablefmt="latex")
         s = s.replace("\\textbackslash{}", "\\").replace("\\$", "$").replace("hf\_we\_topk\_10", "hf$^{10}_{we}$").replace("hf\_we\_", "hf$_{we}$").replace("\\_", "_").replace("\{", "{").replace("\}", "}").replace("\^{}", "^").replace("lllllllllll", "ll|ccccccccc").replace("rand", "\\hline rand")
         print(s, file = stats_file)
 
     pass
+
+def draw_ndr_curve(ys: np.ndarray, xs:np.ndarray, ylegend:list[str], title:str, outfile: str,
+                    xaxis_line = 30, noise_ratio = 20): 
+    ''' 
+        ys - 3d, method * run_id * values 
+        xs - measure points, len(xs) == len(values)
+        len(ylegend) == len(method)
+
+        xs and ys are in range [0, 100]
+    '''
+    plt.ioff()
+    for method_id, method in enumerate(ylegend):
+        y = ys[method_id]
+        y_mean = np.mean(y, axis=0)
+        confidence_level = 0.95
+        degrees_freedom = y.shape[0] - 1
+        sample_standard_error = stats.sem(y, axis=0)
+        confidence_interval = stats.t.interval(confidence_level, degrees_freedom, y_mean, sample_standard_error)
+        min_v = confidence_interval[0]
+        max_v = confidence_interval[1]
+        plt.plot(xs, y_mean, label=method)
+        plt.fill_between(xs, min_v, max_v, alpha=.1, linewidth=0)
+    plt.axvline(x=xaxis_line, color='r', linestyle='--', linewidth=1)
+    plt.axhline(y=100, color='gray', linestyle='--', linewidth=0.5)
+    # best ndr asymptote
+    plt.plot([0, noise_ratio], [0, 100], color='gray', linestyle='--', linewidth=0.5)
+
+    plt.xlim(0, 100)
+    plt.ylim(0, 100)
+    plt.xlabel('Data inspected (\\%)', fontsize=20)
+    plt.ylabel('Detection Rate (\\%)', fontsize = 20)
+    plt.xticks(fontsize=15)
+    plt.yticks(fontsize=15)
+    plt.legend(fontsize='small', fontsize=15)
+    plt.title(title, fontsize=20)
+    plt.tight_layout()
+    plt.savefig(outfile)  
+    plt.clf()      
+
+# def draw_ndr_curves(base_path: str, tasks: list[str], levels = [10,20,30,40,50,60,70,80,90], 
+#                         ndr_prefix = "ndr_bl",
+#                         selected_methods: list[str] = [],
+#                         best_method = True, best_by_infl = True): 
+#     #NOTE: metric_name in ["f30", "auc_ndr"]):
+
+#     for task in tasks:
+
+#         df = pd.read_pickle(os.path.join(base_path, f"{ndr_prefix}_{task}.pcl"))
+
+#         # metric_df = df.reset_index().pivot(index=["infl", "agg", "layer", "module"], columns=["task", "run_id"], values=[metric_name])
+
+#     metric_by_ds_mean = metric_df.groupby(level=1, axis=1).mean()
+#     metric_by_ds_std = metric_df.groupby(level=1, axis=1).std()
+#     metric_by_ds_std.columns = [c + "_std" for c in metric_by_ds_std.columns]
+#     metric_by_ds = pd.merge(metric_by_ds_mean, metric_by_ds_std, left_index=True, right_index=True)
+#     rank_columns = ["rank", "rank_std"]
+#     metric_by_ds["rank"] = ranks.mean(axis=1)
+#     metric_by_ds["rank_std"] = ranks.std(axis=1)
+#     metric_by_ds = metric_by_ds.sort_values(by=['rank', 'rank_std'], ascending=[True, True])
+
+#     metric_by_ds = metric_by_ds[[*[de for d in tasks for de in [d, d + "_std"]], *rank_columns]]
+#     # metric_by_ds.to_csv(f"{base_path}/{metric_name}{suffix}-avg.csv")
+
+#     values_to_highlight = metric_by_ds[tasks].to_numpy().max(axis=0)
+
+
+#     rows = []
+#     for row_id, row in enumerate(metric_by_ds.reset_index().to_dict(orient="records")):
+#         new_row = {}
+#         infl_method = row["infl"]
+#         agg_method = row["agg"]
+#         layer = row["layer"]
+#         module = row["module"]
+#         if with_row_id:
+#             new_row["id"] = (row_id + 1)
+#         new_row["infl"] = infl_method
+#         new_row["agg"] = agg_method
+#         new_row["layer"] = layer
+#         new_row["module"] = module
+#         for did, d in enumerate([*tasks, "rank"]):
+#             should_highlight = False
+#             if d == "rank":
+#                 m = round(row[d] * 10) / 10
+#                 m_std = round(row[d + "_std"] * 10) / 10
+#             else:
+#                 should_highlight = row[d] == values_to_highlight[did]
+#                 m = round(row[d] * 1000) / 10
+#                 m_std = round(row[d + "_std"] * 1000) / 10
+#             m = str(m).rstrip("0").rstrip(".").lstrip("0").replace("-0.", "-.")
+#             m_std = str(m_std).rstrip("0").rstrip(".").lstrip("0")
+
+#             if should_highlight:
+#                 if m_std == "":
+#                     new_row[d] = f"\\textbf{{{m}}}"
+#                 else:
+#                     new_row[d] = f"\\textbf{{{m}}} $\pm$ {m_std}"
+#             else:
+#                 if m_std == "":
+#                     new_row[d] = m
+#                 else:
+#                     new_row[d] = f"{m} $\pm$ {m_std}"
+#         rows.append(new_row)
+
+#     with open(f"{base_path}/ndr-{metric_name}{suffix}-avg.tex", "w") as stats_file:
+#         s = tabulate(rows, headers = "keys", showindex=False, tablefmt="latex")
+#         s = s.replace("\\textbackslash{}", "\\").replace("\\$", "$").replace("hf\_we\_topk\_10", "hf$^{10}_{we}$").replace("hf\_we\_", "hf$_{we}$").replace("\\_", "_").replace("\{", "{").replace("\}", "}").replace("\^{}", "^").replace("lllllllllll", "ll|ccccccccc").replace("rand", "\\hline rand")
+#         print(s, file = stats_file)
+
+#     pass
 
 
 if __name__ == "__main__":
@@ -1731,14 +1840,14 @@ if __name__ == "__main__":
     # run_spearman_tests(metric_name="best_accuracy_1", out_folder=base_path)
     # pass 
 
-    compute_ndr_metrics_table(base_path, task='qnli', 
-                              group_file=group_file,
-                              infl_methods = ['hf', 'cos', 'datainf', 'hf_we_', 'hf_we_topk_10'],
-                              agg_method_names=["mean", "rank"])
-    compute_ndr_metrics_table(base_path, task='mrpc', 
-                              group_file=group_file,
-                              infl_methods = ['hf', 'cos', 'datainf', 'hf_we_', 'hf_we_topk_10'],
-                              agg_method_names=["mean", "rank"])
+    # compute_ndr_metrics_table(base_path, task='qnli', 
+    #                           group_file=group_file, levels=[10, 20, 30, 40, 50, 60, 70, 80, 90],
+    #                           infl_methods = ['hf', 'cos', 'datainf', 'hf_we_', 'hf_we_topk_10'],
+    #                           agg_method_names=["mean", "rank"])
+    # compute_ndr_metrics_table(base_path, task='mrpc', 
+    #                           group_file=group_file, levels=[10, 20, 30, 40, 50, 60, 70, 80, 90],
+    #                           infl_methods = ['hf', 'cos', 'datainf', 'hf_we_', 'hf_we_topk_10'],
+    #                           agg_method_names=["mean", "rank"])
     process_ndr_table(base_path, tasks=['qnli', 'mrpc'], with_row_id=True)
     pass
 
