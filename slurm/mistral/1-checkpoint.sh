@@ -1,7 +1,7 @@
 #!/bin/bash -l
-#SBATCH --job-name=m-pre
+#SBATCH --job-name=m-init
 #SBATCH --time=72:00:00
-#SBATCH --output 0-pre-%a.out
+#SBATCH --output 1-init-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/mistral
 #SBATCH -p hpg-ai # run on partition general
 #SBATCH --gpus=1 # 1 GPU
@@ -20,9 +20,10 @@ task_cwd=/blue/anshumanc.usf/nn-infl/mistral/$task
 mkdir -p $task_cwd
 
 for run_id in {0..4}; do
-    echo "Starting preprocess $task $run_id"
+    echo "Init start checkpoint $task $run_id"
     HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
-        /home/dvitel.usf/nn-infl/src/exp.py preprocess --task=$task --tokenizer-name=mistralai/Mistral-7B-v0.3
-    echo "Done preprocess $task $run_id"
+        /home/dvitel.usf/nn-infl/src/exp.py init-checkpoint --task=$task --model=mistralai/Mistral-7B-v0.3 \
+        --unfreeze-regex=.\*\\.embed_tokens\\..\* --lora-targets=q_proj,v_proj
+    echo "Done init checkpoint $task $run_id"
     echo "----------------------------------"
 done
