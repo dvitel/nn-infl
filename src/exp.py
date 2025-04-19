@@ -9,7 +9,7 @@ from time import time
 import datasets
 from tqdm import tqdm
 
-from postprocess import dir_matrix_score, mean_matrix_score, rank_matrix_score
+from postprocess import compute_ndr_metrics_table, dir_matrix_score, mean_matrix_score, rank_matrix_score
 os.environ['HF_HOME'] = os.path.join(os.getcwd(), '.cache')
 import pickle
 import random
@@ -970,6 +970,20 @@ def load_m_info(task_in_dir: str, task:str, m_prefix: str):
     logits = torch.load(logits_m_path)
     return logits
 
+def ndr(task = "qnli", infl_methods: str = 'datainf', agg_methods: str = 'mean',
+            i_prefix: str = 'i_bl', m_prefix: str = 'm_bl', group_file: str = './groups.json',
+            include_total = True, ndr_prefix: str = 'ndr_bl', device = "cuda",
+            filter_perc = 0.3):
+    infl_methods = infl_methods.split(',')
+    agg_method_names = agg_methods.split(',')
+    compute_ndr_metrics_table(cwd, task, group_file,
+                                    infl_methods = infl_methods,
+                                    agg_method_names = agg_method_names,
+                                    include_total = include_total, filter_perc = filter_perc,
+                                    m_prefix = m_prefix, i_prefix=i_prefix,
+                                    ndr_prefix=ndr_prefix, device = device)
+    pass
+
 def scores(task = "qnli", infl_methods: str = 'datainf', agg_methods: str = 'mean', 
                  i_prefix: str = 'i_bl', m_prefix: str = 'm_bl', group_file: str = '',
                  include_total = True, s_prefix: str = 's_bl', device = "cuda"):
@@ -1171,7 +1185,7 @@ def finetune2(task = 'qnli',
         torch.cuda.empty_cache()
 
 parser = argh.ArghParser()
-parser.add_commands([preprocess, init_checkpoint, finetune, grads, infl, infl_matrix, scores, finetune2])
+parser.add_commands([preprocess, init_checkpoint, finetune, grads, infl, infl_matrix, scores, ndr, finetune2])
 
 def test_infl_vs_infl_matrix(file1: str, file2: str):
     infl = torch.load(file1)

@@ -275,7 +275,21 @@
                 "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev/roberta/qnli"
             }
-        },        
+        },      
+        {
+            "name": "NDR QNLI",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "ndr", "--task=qnli", "--infl-methods=hf,datainf", "--agg-methods=mean,dir,rank", "--m-prefix=m_bl", "--i-prefix=i_bl", "--ndr-prefix=ndr_bl", "--group-file=./groups.json"
+            ],
+            "env": {
+                "INFL_SEED": "42",
+                "INFL_CWD": "./data/roberta"
+            }
+        },          
         {
             "name": "Scores: GLUE QNLI on DistilRoberta",
             "type": "debugpy",
