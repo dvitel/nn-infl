@@ -1743,7 +1743,7 @@ def draw_ndr_curve(ys: np.ndarray, xs:np.ndarray, ylegend:list[str], title:str, 
     plt.ylabel('Detection Rate (\\%)', fontsize = 20)
     plt.xticks(fontsize=15)
     plt.yticks(fontsize=15)
-    plt.legend(fontsize='small', fontsize=15)
+    plt.legend(fontsize=15)
     plt.title(title, fontsize=20)
     plt.tight_layout()
     plt.savefig(outfile)  
@@ -1823,17 +1823,21 @@ def draw_ndr_curve(ys: np.ndarray, xs:np.ndarray, ylegend:list[str], title:str, 
 
 if __name__ == "__main__":
 
-    base_path = "data/roberta"
+    base_path = "data/llama"
     group_file = "./groups.json"
 
-    # create_tun2_metric_table(metric_name="best_accuracy_1", ds_ranks=False, mul = 100, highlight_max = True, out_folder=base_path)
+    # create_tun2_metric_table(metric_name="noise_30", ds_ranks=False, mul = 100, highlight_max = True, out_folder=base_path,
+    #                             with_row_id = False, prec = 1)
     # pass
 
-    # create_tun2_metric_table(metric_name="best_accuracy_1", ds_ranks=False, mul = 100, 
+    # create_tun2_metric_table(metric_name="best_infl_accuracy_1", ds_ranks=False, mul = 100, 
     #                          highlight_max = True, out_folder=base_path,
-    #                             with_row_id = True, prec=1)
+    #                             with_row_id = False, prec=1)
     # pass
-    
+
+    # run_friedman_tests(metric_name="best_accuracy_1", out_folder=base_path)
+    # pass 
+
     # run_wilcoxon_tests(metric_name="best_accuracy_1", out_folder=base_path)
     # pass 
 
@@ -1848,8 +1852,8 @@ if __name__ == "__main__":
     #                           group_file=group_file, levels=[10, 20, 30, 40, 50, 60, 70, 80, 90],
     #                           infl_methods = ['hf', 'cos', 'datainf', 'hf_we_', 'hf_we_topk_10'],
     #                           agg_method_names=["mean", "rank"])
-    process_ndr_table(base_path, tasks=['qnli', 'mrpc'], with_row_id=True)
-    pass
+    # process_ndr_table(base_path, tasks=['qnli', 'mrpc'], with_row_id=True)
+    # pass
 
     
     # for task in benchmark:
@@ -1865,5 +1869,20 @@ if __name__ == "__main__":
     #         # ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
     #         ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': 8},
     #     })
+
+
+    # for task in benchmark:
+    #     draw_tun2_metric(base_path, task, "accuracy", suffix = "best", selected_methods={
+    #         ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': -1},
+    #         # ('hf_we_', 'mean', 'WE'): {'color': '#33e0ff', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+    #         ('hf_we_topk_10', 'mean', 'WE'): {'color': '#33e0ff', 'legend_name': 'hf$^{10}_{we}$', 'legend_order': 1},
+    #         ('hf', 'mean', '04-07'): {'color': 'blue', 'legend_name': 'hf, 04-07', 'legend_order': 2},
+    #         # ('hf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'hf, 00-05', 'legend_order': 3},
+    #         # ('hf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'hf, 06-11', 'legend_order': 4},
+    #         ('cos', 'mean', '04-07'): {'color': 'green', 'legend_name': 'cos, 04-07', 'legend_order': 5},
+    #         ('datainf', 'mean', '00-03'): {'color': 'red', 'legend_name': 'datainf, 00-03', 'legend_order': 6},
+    #         # ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #         ('rand', '', ''): {'color': 'gray', 'legend_name': 'rand', 'legend_order': 8},
+    #     })    
     pass
     
