@@ -1456,7 +1456,7 @@ agg_methods = {
     "pareto": pareto_matrix_score,
     "dir": dir_matrix_score,
     "commonset-20": partial(commonset_matrix_score, vote_ratio = 0.2),
-    "commonsubset-40": partial(commonsubset_matrix_score, vote_ratio = 0.4),
+    "commonsubset-30": partial(commonsubset_matrix_score, vote_ratio = 0.3),
     # "csmi": partial(csmi_matrix_score, vote_ratio = 0.5, descending = False)
 
 
