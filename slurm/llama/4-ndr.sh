@@ -17,13 +17,13 @@ task=${tasks[$SLURM_ARRAY_TASK_ID]}
 
 task_cwd=/blue/anshumanc.usf/nn-infl/llama
 
-echo "Scores $task $run_id"
-HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
+echo "NDR $task"
+HF_TOKEN=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 INFL_SEED=0 INFL_CWD=$task_cwd python \
     /home/dvitel.usf/nn-infl/src/exp.py ndr --task=$task \
     --infl-methods=datainf,cos,hf,hf_we_,hf_we_topk_10 \
     --agg-methods=mean,mean_10,mean_50,dir,rank,commonset-20,commonsubset-30 \
     --m-prefix=m_bl --i-prefix=i_bl --ndr-prefix=ndr_bl \
     --group-file=./groups.json
 
-echo "Done scores $task $run_id"
+echo "Done ndr $task"
 echo "----------------------------------"
