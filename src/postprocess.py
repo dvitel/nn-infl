@@ -1779,10 +1779,93 @@ def draw_ndr_curves(base_path: str, tasks: list[str] = benchmark, levels = [5,10
 
     pass
 
+def draw_tun2_bar_metric(base_path: str, tasks:list[str] = benchmark, metric_name: str = "accuracy", 
+                         selected_methods: dict = {}, from_method = None, suffix = "", title = None):
+    all_task_means = []
+    all_task_std = []
+    categories = [v for k, v in selected_methods.items() if k != from_method] 
+    for task in tasks:
+        task_means = []
+        task_std = []
+        infile = os.path.join(base_path, f"{task}-bl.jsonlist")
+        with open(infile, 'r') as f:
+            json_lines = f.readlines()
+        all_metrics = [json.loads(l) for l in json_lines]
+        method_metrics = defaultdict(list)
+        for metrics in all_metrics:
+            infl_method = metrics['config']['infl_method']
+            agg_method = metrics['config']['agg_method']                
+            module_name = metrics['config']['module_name']
+            key = (infl_method, agg_method, module_name)
+            if key not in selected_methods:
+                continue
+
+            # before_metric_values = metrics['first_finetune'][metric_name] 
+            # after_metric_values = metrics[metric_name]
+            # metric_value = np.max([a - b for a, b in zip(after_metric_values, before_metric_values)])
+
+            before_metric_value = np.max(metrics['first_finetune'][metric_name] )
+            after_metric_value = np.max(metrics[metric_name])
+            metric_value = after_metric_value - before_metric_value
+
+            method_metrics[key].append(metric_value)
+
+        delta = None 
+        if from_method is not None:
+            delta = np.array(method_metrics[from_method])
+
+        for method_id, key in enumerate(selected_methods.keys()):
+            if key == from_method:
+                continue
+            metrics = method_metrics[key]
+            if delta is not None:
+                metric_values = (np.array(metrics) - delta[:len(metrics)]) * 100
+            else:
+                metric_values = np.array(metrics) * 100
+            # mean = np.mean(metric_values)            
+            # std = np.std(metric_values)
+            mean = np.mean(metric_values)            
+            std = 0
+
+            task_means.append(mean)
+            task_std.append(std)
+        all_task_means.append(task_means)
+        all_task_std.append(task_std)
+
+    all_task_means = np.array(all_task_means)
+    all_task_std = np.array(all_task_std)
+
+    xs = np.arange(len(tasks)) * 2.5
+
+    bar_width = 0.3
+
+    plt.ioff()
+
+    for i, category in enumerate(categories):
+        plt.bar(xs + i * bar_width, 
+                all_task_means[:, i], 
+                # yerr=all_task_std[:, i], 
+                width=bar_width, 
+                # error_kw=dict(lw=0.5, capsize=1, capthick=1),
+                label=category)
+
+    # plt.xlabel('Datasets', fontsize=20)
+    plt.axhline(y=0, color='gray', linestyle='--', linewidth=0.5)
+    plt.ylabel('$\\Delta$ Acc, \\%', fontsize=15)
+    plt.xticks(xs + bar_width * (len(categories) - 1) / 2, tasks, rotation=45, fontsize=10)  # Center group labels
+    plt.yticks(fontsize=10)
+    plt.legend(fontsize=10)
+    # plt.title(f'{task.upper()} 70\\% filtered finetuning', fontsize=20)
+    if title:
+        plt.title(title, fontsize=15)
+    # plt.tight_layout()
+    outfile = os.path.join(base_path, "plots", f"{metric_name}{suffix}-diffs.pdf")
+    plt.savefig(outfile)  
+    plt.clf()  
 
 if __name__ == "__main__":
 
-    base_path = "data/roberta"
+    base_path = "data/llama"
     group_file = "./groups.json"
 
     # create_tun2_metric_table(metric_name="noise_30", ds_ranks=False, mul = 100, highlight_max = True, out_folder=base_path,
@@ -1812,13 +1895,74 @@ if __name__ == "__main__":
     #                           infl_methods = ['hf', 'cos', 'datainf', 'hf_we_', 'hf_we_topk_10'],
     #                           agg_method_names=["mean", "rank"])
     # process_ndr_table(base_path, tasks=['qnli', 'mrpc'], with_row_id=True)
-    draw_ndr_curves(base_path, tasks=['qnli', 'mrpc'], 
-                    selected_methods = {
-                            "cos:rank:23:value B": "cos, rank, L23, value B", 
-                            "datainf:mean:18-23:all": "datainf, mean, L18-23, B",
-                            "hf:mean:23:value B": "hf, mean, L23, value B", 
-                            # "hf:mean:total:all": "hf, mean, total",  
-                        })
+
+    # draw_ndr_curves(base_path, tasks=['qnli', 'mrpc'], 
+    #                 selected_methods = {
+    #                         "cos:rank:23:value B": "cos, rank, L23, value B", 
+    #                         "datainf:mean:18-23:all": "datainf, mean, L18-23, B",
+    #                         "hf:mean:23:value B": "hf, mean, L23, value B", 
+    #                         # "hf:mean:total:all": "hf, mean, total",  
+    #                     })
+    pass 
+
+    # draw_tun2_bar_metric(base_path, metric_name="accuracy",
+    #                      selected_methods={
+    #                         # ('denoise', '', ''): "denoise",
+    #                         ('hf_we_', 'mean', 'WE'): "hf$_{we}$",
+    #                         # ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$^{10}_{we}$', 'legend_order': 1},
+    #                         ('hf', 'mean', 'WE'): "hf, WE",
+    #                         # ('hf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'hf, 00-05', 'legend_order': 3},
+    #                         # ('hf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'hf, 06-11', 'legend_order': 4},
+    #                         ('cos', 'mean', '12-17'): "cos, 12-17",
+    #                         ('datainf', 'mean', '18-23'): "datainf, 18-23",
+    #                         # ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                         ('rand', '', ''): "rand",
+    #                     },
+    #                     from_method=("rand", "", ""),
+    #                     suffix = "-rand",
+    #                     title = "Accuracy difference from random")
+
+    # draw_tun2_bar_metric(base_path, metric_name="accuracy",
+    #                      selected_methods={
+    #                         # ('denoise', '', ''): "denoise",
+    #                         ('hf_we_', 'mean', 'WE'): "hf$_{we}$",
+    #                         # ('hf_we_topk_10', 'mean', 'WE'): {'color': '#7f7f7f', 'legend_name': 'hf$^{10}_{we}$', 'legend_order': 1},
+    #                         ('hf', 'mean', 'WE'): "hf, WE",
+    #                         # ('hf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'hf, 00-05', 'legend_order': 3},
+    #                         # ('hf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'hf, 06-11', 'legend_order': 4},
+    #                         ('cos', 'mean', '12-17'): "cos, 12-17",
+    #                         ('datainf', 'mean', '18-23'): "datainf, 18-23",
+    #                         # ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+    #                         ('rand', '', ''): "rand",
+    #                     },
+    #                     # from_method=("rand", "", ""),
+    #                     # suffix = "-rand",
+    #                     title = "Accuracy difference from first finetune")    
+
+    llama_selected_methods = {
+    #         ('denoise', '', ''): {'color': 'gray', 'legend_name': 'denoise', 'legend_order': -1},
+        # ('hf_we_', 'mean', 'WE'): {'color': '#33e0ff', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+        ('hf_we_topk_10', 'mean', 'WE'): "hf$^{10}_{we}$",
+        ('hf', 'mean', '04-07'): "hf, 04-07",
+        # ('hf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'hf, 00-05', 'legend_order': 3},
+        # ('hf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'hf, 06-11', 'legend_order': 4},
+        ('cos', 'mean', '04-07'): "cos, 04-07",
+        ('datainf', 'mean', '00-03'): "datainf, 00-03",
+        # ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+        ('rand', '', ''): "rand",
+    }
+
+    draw_tun2_bar_metric(base_path, metric_name="accuracy",
+                         selected_methods=llama_selected_methods,
+                        from_method=("rand", "", ""),
+                        suffix = "-rand",
+                        title = "Accuracy difference from random")
+
+    draw_tun2_bar_metric(base_path, metric_name="accuracy",
+                         selected_methods=llama_selected_methods,
+                        # from_method=("rand", "", ""),
+                        # suffix = "-rand",
+                        title = "Accuracy difference from first finetune")        
     pass
 
     
