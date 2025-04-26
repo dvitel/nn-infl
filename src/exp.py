@@ -973,7 +973,8 @@ def load_m_info(task_in_dir: str, task:str, m_prefix: str):
 def ndr(task = "qnli", infl_methods: str = 'datainf', agg_methods: str = 'mean',
             i_prefix: str = 'i_bl', m_prefix: str = 'm_bl', group_file: str = './groups.json',
             include_total = True, ndr_prefix: str = 'ndr_bl', device = "cuda",
-            levels:str = "5,10,15,20,25,30,35,40,45,50,60,70,80,90"):
+            levels:str = "5,10,15,20,25,30,35,40,45,50,60,70,80,90",
+            hist_bins = 10):
     levels = levels.split(',')
     levels = [int(level) for level in levels]
     infl_methods = infl_methods.split(',')
@@ -983,7 +984,8 @@ def ndr(task = "qnli", infl_methods: str = 'datainf', agg_methods: str = 'mean',
                                     agg_method_names = agg_method_names,
                                     include_total = include_total, levels = levels,
                                     m_prefix = m_prefix, i_prefix=i_prefix,
-                                    ndr_prefix=ndr_prefix, device = device)
+                                    ndr_prefix=ndr_prefix, device = device,
+                                    noise_hist_bins = hist_bins)
     pass
 
 def scores(task = "qnli", infl_methods: str = 'datainf', agg_methods: str = 'mean', 
