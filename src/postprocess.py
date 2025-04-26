@@ -2045,7 +2045,8 @@ def compute_ndr_metrics_table(base_dir_path: str, task='qnli',
 
 def process_ndr_table(base_path: str, tasks: list[str] = benchmark, output_ranks = False, with_row_id = False,
                         metric_name = 30, ndr_prefix = "ndr_bl", layers = None,
-                        best_group_by = None, custom_suffix = ""): 
+                        best_group_by = None, custom_suffix = "",
+                        agg_method_names = None): 
     #NOTE: metric_name in ["f30", "auc_ndr"]):
 
     dfs = [ pd.read_pickle(os.path.join(base_path, f"{ndr_prefix}_{task}.pcl")) for task in tasks ]
@@ -2054,6 +2055,10 @@ def process_ndr_table(base_path: str, tasks: list[str] = benchmark, output_ranks
     if layers is not None:
         df = df.loc[df.index.get_level_values('layer').isin(layers)]
         df = df.loc[df.index.get_level_values('module') == "all"]
+        pass
+
+    if agg_method_names is not None:
+        df = df.loc[df.index.get_level_values('agg').isin(agg_method_names)]
         pass
 
     metric_df = df.reset_index().pivot(index=["infl", "agg", "layer", "module"], columns=["task", "run_id"], values=[metric_name])
@@ -2805,8 +2810,8 @@ def where_is_the_noise(base_dir_path: str, task: str, infl_method: str,
 
 if __name__ == "__main__":
 
-    # base_path = "data/roberta"
-    base_path = "data/llama-0"
+    base_path = "data/roberta/filter-30-all"
+    # base_path = "data/llama"
     # base_path = "data/mistral"
     group_file = "./groups.json"
 
@@ -2834,9 +2839,10 @@ if __name__ == "__main__":
     #                    device = 'cpu')
     # pass
     # agg_method_names = ["mean", "rank", "rmin", "vote"]
-    agg_method_names = ["rank", "rank-c", "mean", "mean-c", "vote", "vote-c", "rmin", "rmin-c"]
+    # agg_method_names = ["rank", "rank-c", "mean", "mean-c", "vote", "vote-c", "rmin", "rmin-c"]
+    agg_method_names = ["mean", "rank-c", "vote-c"]
     # dss = ["mrpc", "qnli", "sst2", "qqp", "cola", "mnli", "rte", "stsb"]
-    dss = ["mrpc", "qnli", "sst2", "qqp"]
+    # dss = ["mrpc", "qnli", "sst2", "qqp"]
     # dss = ["mrpc"]
     # for ds in dss:
     #     compute_ndr_metrics_table(base_path, task=ds, 
@@ -2847,11 +2853,14 @@ if __name__ == "__main__":
     roberta_layers = ['WE', '00-05', '06-11', '12-17', '18-23', 'CL']
     llama_layers = ['WE', '00-03', '04-07', '08-11', '12-15', 'CL']
     mistral_layers = ['WE', '00-07', '08-15', '16-23', '24-31', 'CL']
-    process_ndr_table(base_path, tasks=dss, with_row_id=False, custom_suffix = "-best", 
-                      best_group_by=["infl", "agg"], layers=llama_layers)
-    process_ndr_table(base_path, tasks=dss, with_row_id=False,
-                        layers=llama_layers)
-    # draw_noise_distr(base_path, tasks=benchmark, layers = roberta_layers, suffix="2")
+    process_ndr_table(base_path, tasks=benchmark, with_row_id=False, custom_suffix = "-best", 
+                      best_group_by=["infl", "agg"], layers=roberta_layers,
+                      agg_method_names=agg_method_names)
+    process_ndr_table(base_path, tasks=benchmark, with_row_id=False,
+                        layers=roberta_layers, agg_method_names=agg_method_names)
+    process_ndr_table(base_path, tasks=benchmark, with_row_id=False, custom_suffix = "-all",
+                        agg_method_names=agg_method_names)
+    # draw_noise_distr(base_path, tasks=benchmark, layers = mistral_layers, suffix="votec", agg_name="vote-c")
     pass
 
     # roberta_selected_methods = {

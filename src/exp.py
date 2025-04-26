@@ -9,7 +9,7 @@ from time import time
 import datasets
 from tqdm import tqdm
 
-from postprocess import compute_ndr_metrics_table, dir_matrix_score, mean_matrix_score, rank_matrix_score
+from postprocess import compute_ndr_metrics_table, dir_matrix_score, mean_matrix_score, min_matrix_score, rank_matrix_score, vote_matrix_score
 os.environ['HF_HOME'] = os.path.join(os.getcwd(), '.cache')
 import pickle
 import random
@@ -946,11 +946,17 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
 
 
 agg_method_fns = {
-    "mean": mean_matrix_score, 
-    "mean_10": partial(mean_matrix_score, trim_ratio=0.1),
-    "mean_50": partial(mean_matrix_score, trim_ratio=0.5),
-    "dir": dir_matrix_score,
-    "rank": rank_matrix_score, 
+    "mean": mean_matrix_score,
+    "mean-c": partial(mean_matrix_score, use_correct = True),
+    # "mean-i": partial(mean_matrix_score, use_correct = False),
+    "rank": rank_matrix_score,
+    "rank-c": partial(rank_matrix_score, use_correct = True), 
+    # "rank-i": partial(rank_matrix_score, use_correct = False),
+    "vote": partial(rank_matrix_score, rank_score_fn = vote_matrix_score),
+    "vote-c": partial(rank_matrix_score, rank_score_fn = vote_matrix_score, use_correct = True),
+
+    "rmin": partial(rank_matrix_score, rank_score_fn = min_matrix_score),
+    "rmin-c": partial(rank_matrix_score, rank_score_fn = min_matrix_score, use_correct = True),
     # add here new agg methods
 }
 
@@ -1006,6 +1012,8 @@ def scores(task = "qnli", infl_methods: str = 'datainf', agg_methods: str = 'mea
     inflset_labels = torch.tensor(inflset_labels, device = device)
 
     inflset_logits = load_m_info(cwd, task, m_prefix).to(device)
+    inflset_preds = torch.argmax(inflset_logits, dim = -1)
+    correct_infl_preds = inflset_preds == inflset_labels
 
     scores_dict = {}
 
@@ -1064,7 +1072,7 @@ def scores(task = "qnli", infl_methods: str = 'datainf', agg_methods: str = 'mea
                 agg_method_fn = agg_method_fns[agg_method_name] 
                 new_scores = agg_method_fn(inf_matrix, noise_mask = noise_mask, 
                                        trainset_labels = trainset_labels, inflset_labels = inflset_labels, 
-                                       inflset_logits = inflset_logits, run_id = seed)
+                                       correct_infl_preds = correct_infl_preds, inflset_logits = inflset_logits, run_id = seed)
                 scores[agg_method_id, matrix_id] = new_scores
                 del new_scores
                 torch.cuda.empty_cache()                 
