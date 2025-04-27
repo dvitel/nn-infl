@@ -516,13 +516,33 @@ def median_matrix_score(int_matrix: torch.Tensor, **_) -> torch.Tensor:
     scores = torch.median(total_int_matrix, dim = -1).values
     return scores
 
+def condorcet_matrix_score(int_matrix: torch.Tensor, *, noise_mask: torch.Tensor, **_) -> torch.Tensor:
+    pass 
+
+def borda_matrix_score(int_matrix: torch.Tensor, *, noise_mask: torch.Tensor, **_) -> torch.Tensor:
+    pass
+
 def vote_matrix_score(rank_matrix: torch.Tensor, *, chunk_size = 10000, filter_perc = 0.3, **_) -> torch.Tensor:
     # total_rank_matrix = rank_matrix.view(rank_matrix.shape[0], -1)
     votes = torch.zeros(rank_matrix.shape[0], dtype = torch.float, device = rank_matrix.device)
-    filter_threshold = round(filter_perc * rank_matrix.shape[-1])
+    filter_threshold = round(filter_perc * rank_matrix.shape[0])
     for (ranks_view, votes_view) in zip(torch.split(rank_matrix, chunk_size, dim = 0),
                                                 torch.split(votes, chunk_size, dim = 0)):    
         votes_view[:] = torch.sum(ranks_view >= filter_threshold, dim=(-2, -1), dtype=torch.float)
+    return votes
+
+def vote2_matrix_score(rank_matrix: torch.Tensor, *, chunk_size = 10000, filter_perc = 0.3, **_) -> torch.Tensor:
+    # total_rank_matrix = rank_matrix.view(rank_matrix.shape[0], -1)
+    votes = torch.zeros(rank_matrix.shape[0], dtype = torch.float, device = rank_matrix.device)
+    filter_threshold = round(filter_perc * rank_matrix.shape[0])
+    # max_rank_value = rank_matrix.shape[0] - 1
+    for (ranks_view, votes_view) in zip(torch.split(rank_matrix, chunk_size, dim = 0),
+                                                torch.split(votes, chunk_size, dim = 0)):    
+        tmp = filter_threshold - ranks_view 
+        tmp[tmp < 0] = 0
+        votes_view[:] = torch.sum(tmp, dim=(-2, -1), dtype=torch.float)
+        del tmp
+    votes.neg_()
     return votes
 
 def min_matrix_score(int_matrix: torch.Tensor, **_) -> torch.Tensor:
@@ -1828,6 +1848,9 @@ agg_methods = {
     # "rank-i": partial(rank_matrix_score, use_correct = False),
     "vote": partial(rank_matrix_score, rank_score_fn = vote_matrix_score),
     "vote-c": partial(rank_matrix_score, rank_score_fn = vote_matrix_score, use_correct = True),
+    
+    "vote2": partial(rank_matrix_score, rank_score_fn = vote2_matrix_score),
+    "vote2-c": partial(rank_matrix_score, rank_score_fn = vote2_matrix_score, use_correct = True),
 
     "rmin": partial(rank_matrix_score, rank_score_fn = min_matrix_score),
     "rmin-c": partial(rank_matrix_score, rank_score_fn = min_matrix_score, use_correct = True),
@@ -2046,20 +2069,25 @@ def compute_ndr_metrics_table(base_dir_path: str, task='qnli',
 def process_ndr_table(base_path: str, tasks: list[str] = benchmark, output_ranks = False, with_row_id = False,
                         metric_name = 30, ndr_prefix = "ndr_bl", layers = None,
                         best_group_by = None, custom_suffix = "",
-                        agg_method_names = None): 
+                        agg_method_names = None, infl_method_names = None): 
     #NOTE: metric_name in ["f30", "auc_ndr"]):
 
     dfs = [ pd.read_pickle(os.path.join(base_path, f"{ndr_prefix}_{task}.pcl")) for task in tasks ]
     df = pd.concat(dfs, ignore_index=False)
+
+    if infl_method_names is not None:
+        df = df.loc[df.index.get_level_values('infl').isin(infl_method_names)]
+        pass
+
+    if agg_method_names is not None:
+        df = df.loc[df.index.get_level_values('agg').isin(agg_method_names)]
+        pass
 
     if layers is not None:
         df = df.loc[df.index.get_level_values('layer').isin(layers)]
         df = df.loc[df.index.get_level_values('module') == "all"]
         pass
 
-    if agg_method_names is not None:
-        df = df.loc[df.index.get_level_values('agg').isin(agg_method_names)]
-        pass
 
     metric_df = df.reset_index().pivot(index=["infl", "agg", "layer", "module"], columns=["task", "run_id"], values=[metric_name])
 
@@ -2810,7 +2838,7 @@ def where_is_the_noise(base_dir_path: str, task: str, infl_method: str,
 
 if __name__ == "__main__":
 
-    base_path = "data/roberta/filter-30-all"
+    base_path = "data/roberta"
     # base_path = "data/llama"
     # base_path = "data/mistral"
     group_file = "./groups.json"
@@ -2840,27 +2868,37 @@ if __name__ == "__main__":
     # pass
     # agg_method_names = ["mean", "rank", "rmin", "vote"]
     # agg_method_names = ["rank", "rank-c", "mean", "mean-c", "vote", "vote-c", "rmin", "rmin-c"]
-    agg_method_names = ["mean", "rank-c", "vote-c"]
+    agg_method_names = ["vote", "vote2", "vote2-c"]
     # dss = ["mrpc", "qnli", "sst2", "qqp", "cola", "mnli", "rte", "stsb"]
     # dss = ["mrpc", "qnli", "sst2", "qqp"]
-    # dss = ["mrpc"]
-    # for ds in dss:
-    #     compute_ndr_metrics_table(base_path, task=ds, 
-    #                             group_file=group_file, levels=[5,10,15,20,25,30,35,40,45,50,60,70,80,90],
-    #                             infl_methods = ['hf', 'cos', 'datainf', 'hf_we_', 'hf_we_topk_10'],
-    #                             agg_method_names=agg_method_names)
+    dss = ["mrpc"]
+    for ds in dss:
+        compute_ndr_metrics_table(base_path, task=ds, 
+                                group_file=group_file, levels=[5,10,15,20,25,30,35,40,45,50,60,70,80,90],
+                                infl_methods = ['hf', 'cos', 'datainf', 'hf_we_', 'hf_we_topk_10'],
+                                agg_method_names=agg_method_names)
+    pass 
 
     roberta_layers = ['WE', '00-05', '06-11', '12-17', '18-23', 'CL']
     llama_layers = ['WE', '00-03', '04-07', '08-11', '12-15', 'CL']
     mistral_layers = ['WE', '00-07', '08-15', '16-23', '24-31', 'CL']
+    selected_layers = roberta_layers
+    # for am in ['mean', 'rank', 'vote', 'rmin']:
+    #     for infl_ms in [['datainf'], ['hf', 'hf_we_', 'hf_we_topk_10'], ['cos']]:
+    #         process_ndr_table(base_path, tasks=benchmark, with_row_id=False,
+    #                             layers=selected_layers, 
+    #                             infl_method_names=infl_ms,
+    #                             agg_method_names=[am, f'{am}-c'], custom_suffix=f"-{infl_ms[0]}-{am}-s")
     process_ndr_table(base_path, tasks=benchmark, with_row_id=False, custom_suffix = "-best", 
-                      best_group_by=["infl", "agg"], layers=roberta_layers,
+                      best_group_by=["infl", "agg"], layers=selected_layers,
                       agg_method_names=agg_method_names)
     process_ndr_table(base_path, tasks=benchmark, with_row_id=False,
-                        layers=roberta_layers, agg_method_names=agg_method_names)
+                        layers=selected_layers, agg_method_names=agg_method_names)
     process_ndr_table(base_path, tasks=benchmark, with_row_id=False, custom_suffix = "-all",
                         agg_method_names=agg_method_names)
-    # draw_noise_distr(base_path, tasks=benchmark, layers = mistral_layers, suffix="votec", agg_name="vote-c")
+    # draw_noise_distr(base_path, tasks=benchmark, layers = selected_layers, suffix="all", agg_name="mean")
+    # draw_noise_distr(base_path, tasks=benchmark, layers = selected_layers, suffix="rankc", agg_name="rank-c")
+    # draw_noise_distr(base_path, tasks=benchmark, layers = selected_layers, suffix="votec", agg_name="vote-c")
     pass
 
     # roberta_selected_methods = {

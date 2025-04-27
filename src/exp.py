@@ -9,7 +9,7 @@ from time import time
 import datasets
 from tqdm import tqdm
 
-from postprocess import compute_ndr_metrics_table, dir_matrix_score, mean_matrix_score, min_matrix_score, rank_matrix_score, vote_matrix_score
+from postprocess import compute_ndr_metrics_table, dir_matrix_score, mean_matrix_score, min_matrix_score, rank_matrix_score, vote2_matrix_score, vote_matrix_score
 os.environ['HF_HOME'] = os.path.join(os.getcwd(), '.cache')
 import pickle
 import random
@@ -954,6 +954,9 @@ agg_method_fns = {
     # "rank-i": partial(rank_matrix_score, use_correct = False),
     "vote": partial(rank_matrix_score, rank_score_fn = vote_matrix_score),
     "vote-c": partial(rank_matrix_score, rank_score_fn = vote_matrix_score, use_correct = True),
+
+    "vote2": partial(rank_matrix_score, rank_score_fn = vote2_matrix_score),
+    "vote2-c": partial(rank_matrix_score, rank_score_fn = vote2_matrix_score, use_correct = True),
 
     "rmin": partial(rank_matrix_score, rank_score_fn = min_matrix_score),
     "rmin-c": partial(rank_matrix_score, rank_score_fn = min_matrix_score, use_correct = True),
