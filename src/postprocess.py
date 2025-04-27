@@ -420,9 +420,14 @@ def mean_min_matrix_score(int_matrix: torch.Tensor, *, min_ratio = None, **_) ->
         scores = torch.min(total_int_matrix, dim = -1).values
     return scores
 
-def cset_matrix_score(int_matrix: torch.Tensor, *, vote_ratio = 0.2, noise_ratio = 0.3, 
+def cset_matrix_score(int_matrix: torch.Tensor, *, correct_infl_preds, vote_ratio = 0.3, noise_ratio = 0.3, use_correct = None,
                                                     both_sides = False, **_) -> torch.Tensor:    
     ''' 3-D tensor: train sample * module * infl sample '''
+    if use_correct is not None:
+        if use_correct:
+            int_matrix = int_matrix[:, :, correct_infl_preds]
+        else:
+            int_matrix = int_matrix[:, :, ~correct_infl_preds]        
     total_int_matrix = int_matrix.view(int_matrix.shape[0], -1)
     votes = torch.zeros(int_matrix.shape[0], dtype = torch.float, device = total_int_matrix.device)
     vote_threshold = int(total_int_matrix.shape[-1] * vote_ratio)
@@ -531,7 +536,7 @@ def vote_matrix_score(rank_matrix: torch.Tensor, *, chunk_size = 10000, filter_p
         votes_view[:] = torch.sum(ranks_view >= filter_threshold, dim=(-2, -1), dtype=torch.float)
     return votes
 
-def vote2_matrix_score(rank_matrix: torch.Tensor, *, chunk_size = 10000, filter_perc = 0.3, **_) -> torch.Tensor:
+def vote2_matrix_score(rank_matrix: torch.Tensor, *, chunk_size = 10000, filter_perc = 0.5, **_) -> torch.Tensor:
     # total_rank_matrix = rank_matrix.view(rank_matrix.shape[0], -1)
     votes = torch.zeros(rank_matrix.shape[0], dtype = torch.float, device = rank_matrix.device)
     filter_threshold = round(filter_perc * rank_matrix.shape[0])
@@ -1846,8 +1851,8 @@ agg_methods = {
     "rank": rank_matrix_score,
     "rank-c": partial(rank_matrix_score, use_correct = True), 
     # "rank-i": partial(rank_matrix_score, use_correct = False),
-    "vote": partial(rank_matrix_score, rank_score_fn = vote_matrix_score),
-    "vote-c": partial(rank_matrix_score, rank_score_fn = vote_matrix_score, use_correct = True),
+    # "vote": partial(rank_matrix_score, rank_score_fn = vote_matrix_score),
+    # "vote-c": partial(rank_matrix_score, rank_score_fn = vote_matrix_score, use_correct = True),
     
     "vote2": partial(rank_matrix_score, rank_score_fn = vote2_matrix_score),
     "vote2-c": partial(rank_matrix_score, rank_score_fn = vote2_matrix_score, use_correct = True),
@@ -1858,7 +1863,8 @@ agg_methods = {
 
     # "median": median_matrix_score,
     # "maj": maj_matrix_score,
-    # "cset": cset_matrix_score,
+    "cset": cset_matrix_score,
+    "cset-c": partial(cset_matrix_score, use_correct = True),
     # "cset-2": partial(cset_matrix_score, both_sides = True),
     # "min": mean_min_matrix_score,
     # "min-20": partial(mean_min_matrix_score, min_ratio=0.2),
@@ -2838,6 +2844,7 @@ def where_is_the_noise(base_dir_path: str, task: str, infl_method: str,
 
 if __name__ == "__main__":
 
+    # base_path = "data/roberta/filter-30-all"
     base_path = "data/roberta"
     # base_path = "data/llama"
     # base_path = "data/mistral"
@@ -2867,10 +2874,10 @@ if __name__ == "__main__":
     #                    device = 'cpu')
     # pass
     # agg_method_names = ["mean", "rank", "rmin", "vote"]
-    # agg_method_names = ["rank", "rank-c", "mean", "mean-c", "vote", "vote-c", "rmin", "rmin-c"]
-    agg_method_names = ["vote", "vote2", "vote2-c"]
+    agg_method_names = ["rank", "rank-c", "mean", "mean-c", "vote", "vote-c", "vote2", "vote2-c"]
+    agg_method_names = ['cset-c']
     # dss = ["mrpc", "qnli", "sst2", "qqp", "cola", "mnli", "rte", "stsb"]
-    # dss = ["mrpc", "qnli", "sst2", "qqp"]
+    # # dss = ["mrpc", "qnli", "sst2", "qqp"]
     dss = ["mrpc"]
     for ds in dss:
         compute_ndr_metrics_table(base_path, task=ds, 
@@ -2882,7 +2889,7 @@ if __name__ == "__main__":
     roberta_layers = ['WE', '00-05', '06-11', '12-17', '18-23', 'CL']
     llama_layers = ['WE', '00-03', '04-07', '08-11', '12-15', 'CL']
     mistral_layers = ['WE', '00-07', '08-15', '16-23', '24-31', 'CL']
-    selected_layers = roberta_layers
+    selected_layers = mistral_layers
     # for am in ['mean', 'rank', 'vote', 'rmin']:
     #     for infl_ms in [['datainf'], ['hf', 'hf_we_', 'hf_we_topk_10'], ['cos']]:
     #         process_ndr_table(base_path, tasks=benchmark, with_row_id=False,
