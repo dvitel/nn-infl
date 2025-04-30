@@ -6,7 +6,7 @@
 #SBATCH -p hpg-ai
 #SBATCH --gpus=1 # 1 GPU
 #SBATCH --mem=16G # default 4GB
-#SBATCH --array=0-7
+#SBATCH --array=0-7%6
 
 module load conda/24.7.1
 conda activate /home/dvitel.usf/torch-env
