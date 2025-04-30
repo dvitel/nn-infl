@@ -6,7 +6,7 @@
 #SBATCH -p hpg-ai
 #SBATCH --gpus=1 # 1 GPU
 #SBATCH --mem=4G # default 4GB
-#SBATCH --array=0-7
+#SBATCH --array=0-7%6
 
 module load conda/24.7.1
 conda activate /home/dvitel.usf/torch-env
@@ -22,7 +22,7 @@ for run_id in {5..9}; do
     HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
         /home/dvitel.usf/nn-infl/src/exp.py scores --task=$task \
         --infl-methods=datainf,cos,hf,hf_we_,hf_we_topk_10,rand,denoise \
-        --agg-methods=mean,mean_10,mean_50,dir,rank \
+        --agg-methods=mean,mean-c,rank,rank-c,vote2,vote2-c \
         --m-prefix=m_bl --i-prefix=i_bl --s-prefix=s_bl \
         --group-file=../groups.json
 
