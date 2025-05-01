@@ -1022,7 +1022,7 @@ def scores(task = "qnli", infl_methods: str = 'datainf', agg_methods: str = 'mea
     inflset_preds = torch.argmax(inflset_logits, dim = -1)
     correct_infl_preds = inflset_preds == inflset_labels
 
-    scores_dict = {}
+    scores_dict = {"noise_mask": noise_mask} #preserve mask to find most infl noise samples
 
     for infl_method in infl_methods:
 
@@ -1091,6 +1091,14 @@ def scores(task = "qnli", infl_methods: str = 'datainf', agg_methods: str = 'mea
 
     scores_path = os.path.join(cwd, f'{s_prefix}_{seed}.pt')
     torch.save(scores_dict, scores_path)
+
+def infl_noise(task = "qnli", infl_methods: str = 'datainf',
+                 i_prefix: str = 'i_bl', m_prefix: str = 'm_bl', group_file: str = '',
+                 topk = 5):
+    ''' For a given dataset, infl methods finds topk infl scores and corrersponding pairs of infl-noisy-train vs validation sample.
+        It is done for each module in infl_matrix dict. 
+    '''
+    pass
 
 def finetune2(task = 'qnli',
          infl_method='datainf', agg_method='', module_name = '',

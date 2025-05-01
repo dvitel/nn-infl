@@ -1123,13 +1123,14 @@ def get_df_from_file(metric_file: str, module_groups):
                }
         rows.append(row)
 
-    for r in rows:
-        key = (r["task"], r["filter_perc"], r["seed"])
-        rand_accuracy, rand_infl_accuracy = rand_accuracies[key]
-        accuracy_rand_delta = r["best_accuracy_1"] - rand_accuracy
-        infl_accuracy_rand_delta = r["best_infl_accuracy_1"] - rand_infl_accuracy
-        r["accuracy_rand_delta"] = accuracy_rand_delta
-        r["infl_accuracy_rand_delta"] = infl_accuracy_rand_delta
+    if len(rand_accuracies) > 0:
+        for r in rows:
+            key = (r["task"], r["filter_perc"], r["seed"])
+            rand_accuracy, rand_infl_accuracy = rand_accuracies[key]
+            accuracy_rand_delta = r["best_accuracy_1"] - rand_accuracy
+            infl_accuracy_rand_delta = r["best_infl_accuracy_1"] - rand_infl_accuracy
+            r["accuracy_rand_delta"] = accuracy_rand_delta
+            r["infl_accuracy_rand_delta"] = infl_accuracy_rand_delta
 
     df = pd.DataFrame(rows)
 
@@ -1152,13 +1153,13 @@ def get_agg_df(df: DataFrame, key_columns = ['task', 'filter_perc', 'infl_method
     return aggregated_sorted
 
 def get_all_df(base_path = "data/roberta/filter-30", datasets = ["mrpc", "qnli", "sst2", "qqp", "cola", "mnli", "rte", "stsb"],
-                tmp_file = "tmp.pkl", module_groups = {}):
+                tmp_file = "tmp.pkl", module_groups = {}, res_suffix = "bl"):
     # if os.path.exists(tmp_file):
     #     df1 = pd.read_pickle(tmp_file)
     # else:
     plain_dataframes = []
     for dataset in datasets:
-        file = os.path.join(base_path, f"{dataset}-bl.jsonlist")
+        file = os.path.join(base_path, "metrics",  f"{dataset}-{res_suffix}.jsonlist")
         df = get_df_from_file(file, module_groups)
         plain_dataframes.append(df)
     
@@ -1417,23 +1418,29 @@ def run_wilcoxon_tests(metric_name: str = "best_accuracy_1",
     pass 
 
 def run_spearman_tests(metric_name: str = "best_accuracy_1", ndr_delta = None,
-                        out_folder = "data/roberta/filter-30", suffix=""):
+                        out_folder = "data/roberta/filter-30", 
+                        ndr_metric_name = "noise_30",
+                        suffix=""):
 
     datasets = ["qnli", "mrpc", "sst2", "qqp", "cola", "mnli", "rte", "stsb"]
 
     all_df = get_all_df(base_path = out_folder, datasets = datasets)
+    if ndr_delta is not None:
+        all_df = all_df[(all_df["infl_method"] != "rand") & (all_df["infl_method"] != "denoise")]
 
-    metrics_per_ds = all_df.pivot(index=["infl_method", "agg_method", "module"], columns=["task", "seed"], values=[metric_name, 'noise_30'])
+    metrics_per_ds = all_df.pivot(index=["infl_method", "agg_method", "module"], columns=["task", "seed"], values=[metric_name, ndr_metric_name])
     metrics_per_ds = metrics_per_ds.dropna(axis=1, how='any')
     metric_columns = {(ds, seed) for _, ds, seed in metrics_per_ds.columns[metrics_per_ds.columns.get_level_values(0) == metric_name]}
-    noise_30_columns = {(ds, seed) for _, ds, seed in metrics_per_ds.columns[metrics_per_ds.columns.get_level_values(0) == 'noise_30']}
-    common_columns = set.intersection(metric_columns, noise_30_columns)
+    ndr_columns = {(ds, seed) for _, ds, seed in metrics_per_ds.columns[metrics_per_ds.columns.get_level_values(0) == ndr_metric_name]}
+    common_columns = set.intersection(metric_columns, ndr_columns)
 
-    rho = {}
-    pvalues = {}
+    # rho = {}
+    # pvalues = {}
+    series1_lists = {}
+    series2_lists = {}
     for ds, seed in common_columns:
         series1 = metrics_per_ds.loc[:, (metric_name, ds, seed)].to_numpy()
-        series2 = metrics_per_ds.loc[:, ('noise_30', ds, seed)].rank(method="average").to_numpy()
+        series2 = metrics_per_ds.loc[:, (ndr_metric_name, ds, seed)].to_numpy()
         if ndr_delta is not None:
             ndr_idxs = np.argsort(series2)[::-1]
             selected_idxs = [ndr_idxs[0]] 
@@ -1446,9 +1453,12 @@ def run_spearman_tests(metric_name: str = "best_accuracy_1", ndr_delta = None,
             series1 = series1[selected_idxs]
             series2 = series2[selected_idxs]
 
-        s = sci_stats.spearmanr(series1, series2)
-        rho.setdefault(ds, []).append(s.correlation)
-        pvalues.setdefault(ds, []).append(s.pvalue)
+        series1_lists.setdefault(ds, []).extend(series1)
+        series2_lists.setdefault(ds, []).extend(series2)
+
+        # s = sci_stats.spearmanr(series1, series2)
+        # rho.setdefault(ds, []).append(s.correlation)
+        # pvalues.setdefault(ds, []).append(s.pvalue)
 
     rows = []
     # header_row = [""]
@@ -1457,34 +1467,39 @@ def run_spearman_tests(metric_name: str = "best_accuracy_1", ndr_delta = None,
     # header_row.append("Total")
     # rows.append(header_row)
 
+
     rho_row = ["Spearman $\\rho$"]
+    p_values = {}
     for d in datasets:
-        ds_rho = rho[d]
-        mean_rho = round(np.mean(ds_rho) * 10) / 10
-        std_rho = round(np.std(ds_rho) * 10) / 10
-        rho_row.append(f"{mean_rho} $\pm$ {std_rho}")
-    all_rho_plain = [v for vl in rho.values() for v in vl]
-    rho_mean = np.mean(all_rho_plain)
-    rho_std = np.std(all_rho_plain)
-    rho_mean = round(np.mean(rho_mean) * 10) / 10
-    rho_std = round(np.std(rho_std) * 10) / 10
-    rho_row.append(f"{mean_rho} $\pm$ {std_rho}")
+        series1 = series1_lists[d]
+        series2 = series2_lists[d]
+        # series1 = np.concatenate(series1_list)
+        # series2 = np.concatenate(series2_list)
+        s = sci_stats.spearmanr(series1, series2)
+        rho_row.append(f"{s.correlation}")
+        p_values[d] = s.pvalue
+    # all_rho_plain = [v for vl in rho.values() for v in vl]
+    # rho_mean = np.mean(all_rho_plain)
+    # rho_std = np.std(all_rho_plain)
+    # rho_mean = round(np.mean(rho_mean) * 10) / 10
+    # rho_std = round(np.std(rho_std) * 10) / 10
+    # rho_row.append(f"{mean_rho} $\pm$ {std_rho}")
     rows.append(rho_row)
 
     pvalue_row = ["p-value"]
     for d in datasets:
-        ds_pvalues = pvalues[d]
-        r = sci_stats.combine_pvalues(ds_pvalues)
+        ds_pvalue = p_values[d]
+        # r = sci_stats.combine_pvalues(ds_pvalues)
         # pvalue_exp = int(f"{r.pvalue:.0e}".split("e")[1].replace("-0", "-").replace("+0", ""))
-        pvalue_row.append(f"{r.pvalue:.0e}")
+        pvalue_row.append(f"{ds_pvalue:.0e}")
     
-    r = sci_stats.combine_pvalues([v for vl in pvalues.values() for v in vl])
+    # r = sci_stats.combine_pvalues([v for vl in pvalues.values() for v in vl])
     # pvalue_exp = int(f"{r.pvalue:.0e}".split("e")[1].replace("-0", "-").replace("+0", ""))
-    pvalue_row.append(f"{r.pvalue:.0e}")
+    # pvalue_row.append(f"{r.pvalue:.0e}")
     rows.append(pvalue_row)
 
     with open(f"{out_folder}/{metric_name}-spearman{suffix}.tex", "w") as stats_file:
-        s = tabulate(rows, headers=["", *datasets, "Total"], showindex=False, tablefmt="latex", numalign="center", stralign="center")
+        s = tabulate(rows, headers=["", *datasets], showindex=False, tablefmt="latex", numalign="center", stralign="center")
         s = s.replace("\\textbackslash{}", "\\").replace("\\$", "$").replace("hf\_we\_topk\_10", "hf$^{10}_{we}$").replace("hf\_we\_", "hf$_{we}$").replace("\\_", "_").replace("\{", "{").replace("\}", "}").replace("\^{}", "^").replace("lllllllllllllllllllllllll", "l|cccccccccccccccccccccccc").replace("rand", "\\hline rand")
         print(s, file = stats_file)
 
@@ -1555,15 +1570,16 @@ def run_best_spearman_test(metric_name: str = "best_accuracy_1",
 def create_tun2_metric_table(metric_name: str = "best_accuracy_1", prec = 2, 
                         out_folder = "data/roberta/filter-30",
                         highlight_max = True, ds_ranks = False, mul = 100,
-                        with_row_id = False):
-    with open("data/roberta/groups.json", "r") as f:
+                        with_row_id = False, res_suffix = "bl"):
+    with open(f"{out_folder}/groups.json", "r") as f:
         module_patterns = json.load(f)
         
     module_patterns = {m: re.compile(p) for m, p in module_patterns.items()}
 
     datasets = ["qnli", "mrpc", "sst2", "qqp", "cola", "mnli", "rte", "stsb"]
 
-    all_df = get_all_df(base_path = out_folder, datasets = datasets, module_groups=module_patterns)
+    all_df = get_all_df(base_path = out_folder, datasets = datasets, module_groups=module_patterns,
+                            res_suffix = res_suffix)
 
     metrics_per_ds = all_df.pivot(index=["infl_method", "agg_method", "module"], columns=["task", "seed"], values=metric_name)
 
@@ -1635,7 +1651,7 @@ def create_tun2_metric_table(metric_name: str = "best_accuracy_1", prec = 2,
                 new_row[d_name] = f"{m} {{\\footnotesize $\pm$ {m_std}}}"
         rows.append(new_row)
 
-    with open(f"{out_folder}/{metric_name}{suffix}-avg.tex", "w") as stats_file:
+    with open(f"{out_folder}/tables/{metric_name}{suffix}-{res_suffix}-avg.tex", "w") as stats_file:
         s = tabulate(rows, headers = "keys", showindex=False, tablefmt="latex")
         s = s.replace("\\textbackslash{}", "\\").replace("\\$", "$").replace("\\_", "_").replace("\{", "{").replace("\}", "}").replace("\^{}", "^").replace("lllllllllll", "ll|ccccccccc").replace("rand", "\\hline rand")
         print(s, file = stats_file)
@@ -1906,7 +1922,11 @@ def compute_ndr_metrics_table(base_dir_path: str, task='qnli',
 
     if group_file != '' and group_file is not None:
         import re
-        with open(os.path.join(base_dir_path, group_file), "r") as f:
+        if os.path.isabs(group_file):
+            group_file_full = group_file
+        else:
+            group_file_full = os.path.join(base_dir_path, group_file)
+        with open(group_file_full, "r") as f:
             module_groups_regex = json.load(f)
         module_groups_patterns = {name: re.compile(pattern) for name, pattern in module_groups_regex.items()}
     else:
@@ -2017,12 +2037,15 @@ def compute_ndr_metrics_table(base_dir_path: str, task='qnli',
 
         auc_ndrs_cpu = auc_ndrs.cpu()
         ndr_at_levels_cpu = ndr_at_levels.cpu()
+        scores_cpu = scores.cpu()
         del auc_ndrs, ndr_at_levels, noise_detection_curves, scores, train_ids
 
         for agg_method_id, agg_method_name in enumerate(agg_method_names):
             for module_id, module_name in enumerate(module_and_group_names):
                 one_metrics = {level: ndr_at_levels_cpu[agg_method_id, module_id, level_i].item()  for level_i, level in enumerate(levels) }
                 one_metrics["auc_ndr"] = auc_ndrs_cpu[agg_method_id, module_id].item()                
+                one_metrics["scores"] = scores_cpu[agg_method_id, module_id].tolist()
+                one_metrics["noise_mask"] = noise_list
                 if hists is not None:
                     for bin_id in range(noise_hist_bins):
                         one_metrics[f"hist_y_{bin_id}"] = hists[agg_method_id, module_id, bin_id].item()
@@ -2840,15 +2863,30 @@ def where_is_the_noise(base_dir_path: str, task: str, infl_method: str,
 
     # sorted_method_keys = sorted(first_30_ranks.keys(), key = lambda x: (first_30_ranks[x], x))
 
+#NOTE: not finished
+# def draw_cancellation(task: str, base_path:str):
+#     ds_path = os.path.join(base_path, f"{task}-bl.jsonlist")
+#     with open(ds_path, 'r') as f:
+#         json_lines = f.readlines()
+#     all_metrics = [json.loads(l) for l in json_lines]
+    
+#     for metrics in all_metrics:
+#         print(metrics)
+#         pass
+
+network_layers = {
+    "roberta": ['WE', '00-05', '06-11', '12-17', '18-23', 'CL'],
+    "llama": ['WE', '00-03', '04-07', '08-11', '12-15', 'CL'],
+    "mistral": ['WE', '00-07', '08-15', '16-23', '24-31', 'CL']
+}
 
 
 if __name__ == "__main__":
 
-    # base_path = "data/roberta/filter-30-all"
-    base_path = "data/roberta"
-    # base_path = "data/llama"
-    # base_path = "data/mistral"
+    network = "roberta"
     group_file = "./groups.json"
+    base_path = f"data/{network}"
+    selected_layers = network_layers[network]
 
     # create_tun2_metric_table(metric_name="noise_30", ds_ranks=False, mul = 100, highlight_max = True, out_folder=base_path,
     #                             with_row_id = False, prec = 1)
@@ -2856,8 +2894,9 @@ if __name__ == "__main__":
 
     # create_tun2_metric_table(metric_name="best_accuracy_1", ds_ranks=False, mul = 100, 
     #                          highlight_max = True, out_folder=base_path,
-    #                             with_row_id = False, prec=1)
-    pass
+    #                             with_row_id = False, prec=1,
+    #                             res_suffix="bl")
+    # pass
 
     # run_friedman_tests(metric_name="best_accuracy_1", out_folder=base_path)
     # pass 
@@ -2866,7 +2905,9 @@ if __name__ == "__main__":
     # pass 
 
     # run_best_spearman_test(metric_name="best_accuracy_1", out_folder=base_path)
-    # pass 
+    # run_spearman_tests(metric_name="best_accuracy_1", ndr_metric_name="noise_30", 
+    #                    out_folder=base_path, suffix="-auc", ndr_delta = 0.1)
+    pass 
 
     # where_is_the_noise(base_path, task='qnli', infl_method='datainf', 
     #                    module_pattern=".*\\.layers\\.([4-7])\\..*\\.lora_(A)\\..*",
@@ -2874,14 +2915,16 @@ if __name__ == "__main__":
     #                    device = 'cpu')
     # pass
     # agg_method_names = ["mean", "rank", "rmin", "vote"]
-    agg_method_names = ["rank", "rank-c", "mean", "mean-c", "vote", "vote-c", "vote2", "vote2-c"]
-    agg_method_names = ['cset-c']
+    agg_method_names = ["rank", "rank-c", "mean", "mean-c", "cset", "cset-c", "vote2", "vote2-c"]
+    # agg_method_names = ['cset-c']
     # dss = ["mrpc", "qnli", "sst2", "qqp", "cola", "mnli", "rte", "stsb"]
     # # dss = ["mrpc", "qnli", "sst2", "qqp"]
     dss = ["mrpc"]
+    base_infl_path = os.path.join(base_path, "infl-tensors")
+    group_file_2 = os.path.abspath(os.path.join(base_path, "groups.json"))
     for ds in dss:
-        compute_ndr_metrics_table(base_path, task=ds, 
-                                group_file=group_file, levels=[5,10,15,20,25,30,35,40,45,50,60,70,80,90],
+        compute_ndr_metrics_table(base_infl_path, task=ds, 
+                                group_file=group_file_2, levels=[5,10,15,20,25,30,35,40,45,50,60,70,80,90],
                                 infl_methods = ['hf', 'cos', 'datainf', 'hf_we_', 'hf_we_topk_10'],
                                 agg_method_names=agg_method_names)
     pass 
@@ -2896,13 +2939,13 @@ if __name__ == "__main__":
     #                             layers=selected_layers, 
     #                             infl_method_names=infl_ms,
     #                             agg_method_names=[am, f'{am}-c'], custom_suffix=f"-{infl_ms[0]}-{am}-s")
-    process_ndr_table(base_path, tasks=benchmark, with_row_id=False, custom_suffix = "-best", 
-                      best_group_by=["infl", "agg"], layers=selected_layers,
-                      agg_method_names=agg_method_names)
-    process_ndr_table(base_path, tasks=benchmark, with_row_id=False,
-                        layers=selected_layers, agg_method_names=agg_method_names)
-    process_ndr_table(base_path, tasks=benchmark, with_row_id=False, custom_suffix = "-all",
-                        agg_method_names=agg_method_names)
+    # process_ndr_table(base_path, tasks=benchmark, with_row_id=False, custom_suffix = "-best", 
+    #                   best_group_by=["infl", "agg"], layers=selected_layers,
+    #                   agg_method_names=agg_method_names)
+    # process_ndr_table(base_path, tasks=benchmark, with_row_id=False,
+    #                     layers=selected_layers, agg_method_names=agg_method_names)
+    # process_ndr_table(base_path, tasks=benchmark, with_row_id=False, custom_suffix = "-all",
+    #                     agg_method_names=agg_method_names)
     # draw_noise_distr(base_path, tasks=benchmark, layers = selected_layers, suffix="all", agg_name="mean")
     # draw_noise_distr(base_path, tasks=benchmark, layers = selected_layers, suffix="rankc", agg_name="rank-c")
     # draw_noise_distr(base_path, tasks=benchmark, layers = selected_layers, suffix="votec", agg_name="vote-c")
@@ -3001,7 +3044,7 @@ if __name__ == "__main__":
         ('denoise', '', ''): {'color': 'gray', 'legend_name': 'Full', 'legend_order': -1},
         # ('hf_we_', 'mean', 'WE'): {'color': '#33e0ff', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
         # ('hf_we_topk_10', 'mean', 'WE'): "hf$^{10}_{we}$",
-        ('hf', 'mean', '00-07'): {'color': 'blue', 'legend_name': 'TracIn, 00-07', 'legend_order': 2},
+        ('hf_we_topk_10', 'mean', 'WE'): {'color': 'blue', 'legend_name': 'TracIn$^{10}_{we}$, WE', 'legend_order': 2},
         # ('hf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'hf, 00-05', 'legend_order': 3},
         # ('hf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'hf, 06-11', 'legend_order': 4},
         ('cos', 'mean', '08-15'): {'color': 'green', 'legend_name': 'Cosine, 08-15', 'legend_order': 5},
@@ -3010,11 +3053,11 @@ if __name__ == "__main__":
         ('rand', '', ''): {'color': 'gray', 'legend_name': 'Random', 'legend_order': 8},        
     }
 
-    # draw_all_tun2_metric(base_path, selected_methods=llama_selected_methods)
+    # draw_all_tun2_metric(base_path, selected_methods=mistral_selected_methods)
     # roberta_layers = ['WE', '00-05', '06-11', '12-17', '18-23', 'CL']
-    llama_layers = ['WE', '00-03', '04-07', '08-11', '12-15', 'CL']
+    # llama_layers = ['WE', '00-03', '04-07', '08-11', '12-15', 'CL']
     # mistral_layers = ['WE', '00-07', '08-15', '16-23', '24-31', 'CL']
-    # draw_all_tun2_box_metric(base_path, layers = llama_layers)
+    # draw_all_tun2_box_metric(base_path, layers = mistral_layers)
     pass
 
 
