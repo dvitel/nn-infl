@@ -1948,7 +1948,7 @@ def compute_ndr_metrics_table(base_dir_path: str, task='qnli',
         file_name = file_name_with_ext.split('.')[0]
         fine_name_parts = file_name[len(i_prefix):].split('_')[1:]
         *method_parts, _, run_id_str = fine_name_parts
-        # run_id = int(run_id_str)
+        run_id = int(run_id_str)
         infl_method = '_'.join(method_parts)
         if infl_method not in infl_methods:
             continue
@@ -2046,6 +2046,7 @@ def compute_ndr_metrics_table(base_dir_path: str, task='qnli',
                 one_metrics["auc_ndr"] = auc_ndrs_cpu[agg_method_id, module_id].item()                
                 one_metrics["scores"] = scores_cpu[agg_method_id, module_id].tolist()
                 one_metrics["noise_mask"] = noise_list
+                one_metrics["run_id"] = run_id
                 if hists is not None:
                     for bin_id in range(noise_hist_bins):
                         one_metrics[f"hist_y_{bin_id}"] = hists[agg_method_id, module_id, bin_id].item()
@@ -2069,7 +2070,7 @@ def compute_ndr_metrics_table(base_dir_path: str, task='qnli',
             module_layer, module_simple_name = module_name, "all"
         else:
             module_layer, module_simple_name = get_simple_module_and_layer_name(module_name)
-        for run_id, metrics_dict in enumerate(metrics_list_of_dict):
+        for metrics_dict in metrics_list_of_dict:
             # auc_ndr = auc_ndr_by_infl[key][run_id]
             # f30_mean, f30_std = first_30_mean_std[sk]
             # auc_ndr_mean, auc_ndr_std = auc_rocs_mean_std[sk]
@@ -2081,7 +2082,6 @@ def compute_ndr_metrics_table(base_dir_path: str, task='qnli',
                 "agg": agg_method_name,
                 "layer": module_layer,
                 "module": module_simple_name,
-                "run_id": run_id,
                 **metrics_dict
             }
             rows.append(row_data)
@@ -2880,8 +2880,19 @@ network_layers = {
     "mistral": ['WE', '00-07', '08-15', '16-23', '24-31', 'CL']
 }
 
+def ndr_test():
+    run_id = 2
+    base_path = "data/roberta/ndr/test"
+    ndr_path = os.path.join(base_path, f"ndr_bl_qnli.pcl")
+    df = pd.read_pickle(ndr_path)
+    scores_path = os.path.join(base_path, f"s_bl_{run_id}.pt")
+    scores_dict = torch.load(scores_path)
+    pass
 
 if __name__ == "__main__":
+
+    # ndr_test()
+    # pass
 
     network = "roberta"
     group_file = "./groups.json"
