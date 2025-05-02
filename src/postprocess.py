@@ -1498,7 +1498,7 @@ def run_spearman_tests(metric_name: str = "best_accuracy_1", ndr_delta = None,
     # pvalue_row.append(f"{r.pvalue:.0e}")
     rows.append(pvalue_row)
 
-    with open(f"{out_folder}/{metric_name}-spearman{suffix}.tex", "w") as stats_file:
+    with open(f"{out_folder}/tables/{metric_name}-spearman{suffix}.tex", "w") as stats_file:
         s = tabulate(rows, headers=["", *datasets], showindex=False, tablefmt="latex", numalign="center", stralign="center")
         s = s.replace("\\textbackslash{}", "\\").replace("\\$", "$").replace("hf\_we\_topk\_10", "hf$^{10}_{we}$").replace("hf\_we\_", "hf$_{we}$").replace("\\_", "_").replace("\{", "{").replace("\}", "}").replace("\^{}", "^").replace("lllllllllllllllllllllllll", "l|cccccccccccccccccccccccc").replace("rand", "\\hline rand")
         print(s, file = stats_file)
@@ -2101,7 +2101,7 @@ def process_ndr_table(base_path: str, tasks: list[str] = benchmark, output_ranks
                         agg_method_names = None, infl_method_names = None): 
     #NOTE: metric_name in ["f30", "auc_ndr"]):
 
-    dfs = [ pd.read_pickle(os.path.join(base_path, f"{ndr_prefix}_{task}.pcl")) for task in tasks ]
+    dfs = [ pd.read_pickle(os.path.join(base_path, "ndr", f"{ndr_prefix}_{task}.pcl")) for task in tasks ]
     df = pd.concat(dfs, ignore_index=False)
 
     if infl_method_names is not None:
@@ -2191,7 +2191,7 @@ def process_ndr_table(base_path: str, tasks: list[str] = benchmark, output_ranks
                     new_row[d] = f"{m} $\pm$ {m_std}"
         rows.append(new_row)
 
-    with open(f"{base_path}/ndr-{metric_name}{suffix}{custom_suffix}-avg.tex", "w") as stats_file:
+    with open(f"{base_path}/tables/ndr-{metric_name}{suffix}{custom_suffix}-avg.tex", "w") as stats_file:
         s = tabulate(rows, headers = "keys", showindex=False, tablefmt="latex")
         s = s.replace("\\textbackslash{}", "\\").replace("\\$", "$").replace("hf\_we\_topk\_10", "hf$^{10}_{we}$").replace("hf\_we\_", "hf$_{we}$").replace("\\_", "_").replace("\{", "{").replace("\}", "}").replace("\^{}", "^").replace("lllllllllll", "ll|ccccccccc").replace("rand", "\\hline rand")\
             .replace("_10", "$^{10}$").replace("_50", "$^{50}$")\
@@ -2889,6 +2889,101 @@ def ndr_test():
     scores_dict = torch.load(scores_path)
     pass
 
+
+def compute_corr_matrix(base_path: str, tasks = benchmark,
+                        ndr_prefix = "ndr_bl", agg_method = "mean",
+                        infl_method_names = ['cos', 'hf', 'datainf'],
+                        selected_layers = ['WE'],
+                        run_ids = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]):
+    ''' For each of tasks computes noise correlation from ndr recorded scores 
+        to establish how similar the distribution of noise across the modules by different methods
+    '''
+    dfs = [ pd.read_pickle(os.path.join(base_path, "ndr", f"{ndr_prefix}_{task}.pcl")) for task in tasks ]
+    df = pd.concat(dfs, ignore_index=False)
+    per_task_data = {}
+    setup_seq = []
+
+    inf_method_layers = []
+    for infl_method in infl_method_names:
+        for layer in selected_layers:
+            if infl_method == 'hf' and layer == 'WE':
+                inf_method_layers.append(('hf_we_', layer))
+                inf_method_layers.append(('hf_we_topk_10', layer))
+                inf_method_layers.append((infl_method, layer))
+            elif infl_method == 'datainf' and layer == 'WE':
+                continue
+            else:
+                inf_method_layers.append((infl_method, layer))
+    for task in tasks:
+        setup_data = per_task_data.setdefault(task, {})
+        for infl_method, layer in inf_method_layers: 
+            setup_name = (infl_method, layer)
+            setup_seq.append(setup_name)
+            for run_id in run_ids:
+                metrics = df.loc[(task, infl_method, agg_method, layer, 'all', run_id)]
+                all_scores = np.array(metrics['scores'])
+                noise_mask = np.array(metrics['noise_mask'])
+                noise_scores = all_scores[noise_mask]
+                setup_data.setdefault(setup_name, []).extend(noise_scores)
+
+    for task in tasks:
+        setup_data = per_task_data[task]
+        scores_df = pd.DataFrame(setup_data)
+        scores_corr = scores_df.corr(method='spearman')
+        scores_corr.to_pickle(os.path.join(base_path, "ndr", f"noise-corr-{task}.pcl"))
+        pass
+    pass
+
+def average_correlation_matrices(corr_matrices):
+    fisher_transformed = [np.arctanh(corr) for corr in corr_matrices]
+    fisher_mean = np.mean(fisher_transformed, axis=0)
+    averaged_corr = np.tanh(fisher_mean)
+    return pd.DataFrame(averaged_corr, index=corr_matrices[0].index, columns=corr_matrices[0].columns)
+
+def draw_one_corr_heatmap(scores_corr: pd.DataFrame, task: str, base_path: str):
+    import seaborn as sns
+    ticklabels = ["TracIn$^{10}_{we}$" if m == "hf_we_topk_10" else "TracIn$_{we}$" if m == "hf_we_" else l for m, l in scores_corr.index ]
+    plt.figure(figsize=(10, 8))
+    ax = sns.heatmap(scores_corr, annot=True, fmt=".1f", cmap='coolwarm', cbar=False,
+                        xticklabels=ticklabels, yticklabels=ticklabels)
+    ax.set_xlabel("")
+    ax.set_ylabel("")   
+    ax.invert_yaxis()  
+    boundary_positions = [6, 14]  # Positions where you want the borders
+    for pos in boundary_positions:
+        ax.hlines(pos, *ax.get_xlim(), colors="black", linewidth=2)  # Horizontal line
+        ax.vlines(pos, *ax.get_ylim(), colors="black", linewidth=2)  # Vertical line
+
+    ax.text(-0.5, 3, f"Cosine", ha='center', va='center', rotation='vertical', fontsize=10, color='black')
+    ax.text(-0.5, 10, f"TracIn", ha='center', va='center', rotation='vertical', fontsize=10, color='black')
+    ax.text(-0.5, 16.5, f"DataInf", ha='center', va='center', rotation='vertical', fontsize=10, color='black')
+
+    ax.text(3, -0.7, f"Cosine", ha='center', va='center', fontsize=10, color='black')
+    ax.text(10, -0.7, f"TracIn", ha='center', va='center', fontsize=10, color='black')
+    ax.text(16.5, -0.7, f"DataInf", ha='center', va='center', fontsize=10, color='black')
+
+    ax.tick_params(axis='x', labelsize=7, rotation=0)  # Set font size for x-axis tick labels
+    ax.tick_params(axis='y', labelsize=7, rotation = 90)  # Set font size for y-axis tick labels
+
+    if task != "":
+        plt.title(f"{task.upper()}")
+    plt.tight_layout()
+    plt.savefig(os.path.join(base_path, "plots", f"noise-corr-{task}.pdf"))
+    plt.clf()
+
+def draw_corr_heatmap(base_path: str, tasks = benchmark):
+    import seaborn as sns
+    plt.ioff()
+    corr_matrices = []
+    for task in tasks:
+        scores_corr = pd.read_pickle(os.path.join(base_path, "ndr", f"noise-corr-{task}.pcl"))
+        draw_one_corr_heatmap(scores_corr, task, base_path)
+        corr_matrices.append(scores_corr)
+        pass
+    avg_corr = average_correlation_matrices(corr_matrices)
+    draw_one_corr_heatmap(avg_corr, "", base_path)
+    pass
+
 if __name__ == "__main__":
 
     # ndr_test()
@@ -2899,9 +2994,13 @@ if __name__ == "__main__":
     base_path = f"data/{network}"
     selected_layers = network_layers[network]
 
+    # compute_corr_matrix(base_path, selected_layers=selected_layers)
+    draw_corr_heatmap(base_path)
+    pass
+
     # create_tun2_metric_table(metric_name="noise_30", ds_ranks=False, mul = 100, highlight_max = True, out_folder=base_path,
     #                             with_row_id = False, prec = 1)
-    pass
+    # pass
 
     # create_tun2_metric_table(metric_name="best_accuracy_1", ds_ranks=False, mul = 100, 
     #                          highlight_max = True, out_folder=base_path,
@@ -2916,8 +3015,8 @@ if __name__ == "__main__":
     # pass 
 
     # run_best_spearman_test(metric_name="best_accuracy_1", out_folder=base_path)
-    # run_spearman_tests(metric_name="best_accuracy_1", ndr_metric_name="noise_30", 
-    #                    out_folder=base_path, suffix="-auc", ndr_delta = 0.1)
+    run_spearman_tests(metric_name="best_accuracy_1", ndr_metric_name="noise_30", 
+                       out_folder=base_path, suffix="-30") #, ndr_delta = 0.1)
     pass 
 
     # where_is_the_noise(base_path, task='qnli', infl_method='datainf', 
@@ -2928,16 +3027,16 @@ if __name__ == "__main__":
     # agg_method_names = ["mean", "rank", "rmin", "vote"]
     agg_method_names = ["rank", "rank-c", "mean", "mean-c", "cset", "cset-c", "vote2", "vote2-c"]
     # agg_method_names = ['cset-c']
-    # dss = ["mrpc", "qnli", "sst2", "qqp", "cola", "mnli", "rte", "stsb"]
+    dss = ["mrpc", "qnli", "sst2", "qqp", "cola", "mnli", "rte", "stsb"]
     # # dss = ["mrpc", "qnli", "sst2", "qqp"]
-    dss = ["mrpc"]
-    base_infl_path = os.path.join(base_path, "infl-tensors")
-    group_file_2 = os.path.abspath(os.path.join(base_path, "groups.json"))
-    for ds in dss:
-        compute_ndr_metrics_table(base_infl_path, task=ds, 
-                                group_file=group_file_2, levels=[5,10,15,20,25,30,35,40,45,50,60,70,80,90],
-                                infl_methods = ['hf', 'cos', 'datainf', 'hf_we_', 'hf_we_topk_10'],
-                                agg_method_names=agg_method_names)
+    # dss = ["mrpc"]
+    # base_infl_path = os.path.join(base_path, "infl-tensors")
+    # group_file_2 = os.path.abspath(os.path.join(base_path, "groups.json"))
+    # for ds in dss:
+    #     compute_ndr_metrics_table(base_infl_path, task=ds, 
+    #                             group_file=group_file_2, levels=[5,10,15,20,25,30,35,40,45,50,60,70,80,90],
+    #                             infl_methods = ['hf', 'cos', 'datainf', 'hf_we_', 'hf_we_topk_10'],
+    #                             agg_method_names=agg_method_names)
     pass 
 
     roberta_layers = ['WE', '00-05', '06-11', '12-17', '18-23', 'CL']
