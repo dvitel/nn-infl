@@ -967,7 +967,7 @@ agg_method_fns = {
     # add here new agg methods
 }
 
-def load_ds_info(task_in_dir: str, task: str):
+def load_ds_info(task_in_dir: str, task: str, with_input_ids = False):
     ds_path = os.path.join(task_in_dir, f'd_{task}_{seed}')
     ds = datasets.load_from_disk(ds_path)
     trainset = ds['train']
@@ -975,6 +975,10 @@ def load_ds_info(task_in_dir: str, task: str):
     trainset_labels = trainset['labels']
     inflset = ds['infl']
     inflset_labels = inflset['labels']
+    if with_input_ids:
+        train_input_ids = trainset['input_ids']
+        infl_input_ids = inflset['input_ids']
+        return noise_list, trainset_labels, inflset_labels, (train_input_ids, infl_input_ids)
     return noise_list, trainset_labels, inflset_labels
 
 def load_m_info(task_in_dir: str, task:str, m_prefix: str):
@@ -1092,12 +1096,170 @@ def scores(task = "qnli", infl_methods: str = 'datainf', agg_methods: str = 'mea
     scores_path = os.path.join(cwd, f'{s_prefix}_{seed}.pt')
     torch.save(scores_dict, scores_path)
 
+# def infl_noise(task = "qnli", infl_methods: str = 'datainf',
+#                  s_prefix: str = 's_bl', m_prefix: str = 'm_bl',
+#                  topk = 5, device = "cuda"):
+#     ''' For a given dataset, infl methods finds topk infl scores and corrersponding pairs of infl-noisy-train vs validation sample.
+#         It is done for each module in infl_matrix dict. 
+#     '''
+#     infl_methods = infl_methods.split(',')
+
+#     # load dataset --> load noise tensor 
+#     # load model and tokenizer  --> token compression
+#     # load infl scores 
+#     # from infl scores, find train sample ids that both belong to noise and has highest scores, top5 per method per layer
+#     # find input_ids by obtained train sample ids
+#     # transform them back to text - using additional mapper that compresses tokens
+
+#     noise_list, trainset_labels, inflset_labels, input_ids = load_ds_info(cwd, task, with_input_ids=True)
+#     # next 4 lines for testing
+#     noise_list = noise_list[:100]
+#     trainset_labels = trainset_labels[:100]
+#     inflset_labels = inflset_labels[:100]
+#     input_ids = input_ids[:100]
+
+#     noise_mask = torch.tensor(noise_list, device = device)
+#     trainset_labels = torch.tensor(trainset_labels, device = device)
+#     noise_labels = trainset_labels[noise_mask]
+#     noise_input_ids = [input_ids[i] for i in range(len(noise_mask)) if noise_mask[i]]
+#     clean_labels = trainset_labels[~noise_mask]
+#     clean_input_ids = [input_ids[i] for i in range(len(noise_mask)) if not noise_mask[i]]
+#     inflset_labels = torch.tensor(inflset_labels, device = device)
+
+#     scores_path = os.path.join(cwd, f'{s_prefix}_{seed}.pt')
+#     scores_dict = torch.load(scores_path)
+
+#     model_path = os.path.join(cwd, f'{m_prefix}_{task}_{seed}')
+
+#     tokenizer = load_tokenizer(model_path)
+#     # we need 'rank' as agg_method and module_name == '' (total) - total ranking of samples across network
+#     method_ids = [(m, 'rank', '') for m in infl_methods]
+#     for method_id in method_ids:
+#         scores = scores_dict[method_id]
+#         noise_scores = scores[noise_mask]
+#         clean_scores = scores[~noise_mask]
+#         noisy_train_idxs = torch.argsort(noise_scores)
+#         noisy_topk_train_idxs = noisy_train_idxs[-topk:] 
+#         infl_noise_input_ids = [noise_input_ids[i] for i in noisy_topk_train_idxs]
+#         clean_train_idxs = torch.argsort(clean_scores)
+#         clean_topk_train_idxs = clean_train_idxs[-topk:]
+#         infl_clean_input_ids = [clean_input_ids[i] for i in clean_topk_train_idxs]
+#         pass
+#     pass
+
+
 def infl_noise(task = "qnli", infl_methods: str = 'datainf',
-                 i_prefix: str = 'i_bl', m_prefix: str = 'm_bl', group_file: str = '',
-                 topk = 5):
+                 i_prefix: str = 'i_bl', m_prefix: str = 'm_bl',
+                 topk = 5, device = "cuda"):
     ''' For a given dataset, infl methods finds topk infl scores and corrersponding pairs of infl-noisy-train vs validation sample.
         It is done for each module in infl_matrix dict. 
     '''
+    infl_methods = infl_methods.split(',')
+    topk = int(topk)
+
+    noise_list, trainset_labels, inflset_labels, (train_input_ids, infl_input_ids) = load_ds_info(cwd, task, with_input_ids=True)
+    
+    # next lines for testing
+    # noise_list = noise_list[:100]
+    # trainset_labels = trainset_labels[:100]
+    # inflset_labels = inflset_labels[:100]
+    # train_input_ids = train_input_ids[:100]
+    # infl_input_ids = infl_input_ids[:100]
+    
+    noise_mask = torch.tensor(noise_list, device = device)
+    trainset_labels = torch.tensor(trainset_labels, device = device)
+    noise_labels = trainset_labels[noise_mask]
+    noise_input_ids = [train_input_ids[i] for i in range(len(noise_mask)) if noise_mask[i]]
+    clean_labels = trainset_labels[~noise_mask]
+    clean_input_ids = [train_input_ids[i] for i in range(len(noise_mask)) if not noise_mask[i]]
+    inflset_labels = torch.tensor(inflset_labels, device = device)
+    model_path = os.path.join(cwd, f'{m_prefix}_{task}_{seed}')
+    tokenizer = load_tokenizer(model_path)
+    inflset_logits = load_m_info(cwd, task, m_prefix).to(device)
+    inflset_preds = torch.argmax(inflset_logits, dim = -1)   
+
+    results = {}
+
+    for infl_method in infl_methods:
+
+        file_path = os.path.join(cwd, f'{i_prefix}_{infl_method}_{task}_{seed}.pt')
+        matrix_dict = torch.load(file_path)        
+        module_names = list(matrix_dict.keys())
+        # transpose all matrices 
+        for module_name in module_names:
+            matrix_dict[module_name] = matrix_dict[module_name].t().to(device) # first dim is train_sample now and second is infl val sample
+        if len(module_names) == 0:
+            continue
+        all_interactions = torch.stack([matrix_dict[module_name] for module_name in module_names], dim = 2)
+        for int_matrix in matrix_dict.values():
+            del int_matrix
+
+        avg_scores_over_modules = all_interactions.mean(dim = 2)
+        del all_interactions
+
+        noise_avg_scores = avg_scores_over_modules[noise_mask]
+        clean_avg_scores = avg_scores_over_modules[~noise_mask]
+        del avg_scores_over_modules
+
+        noise_flat_scores_1d = noise_avg_scores.view(-1)
+        noise_sort_pair_ids = torch.argsort(noise_flat_scores_1d, descending=True) # from high to low score 
+        noise_topk_pair_ids = noise_sort_pair_ids[:topk]
+        noise_topk_train_ids = noise_topk_pair_ids // noise_avg_scores.shape[1]
+        noise_topk_val_ids = noise_topk_pair_ids % noise_avg_scores.shape[1]
+        noise_topk_scores = noise_flat_scores_1d[noise_topk_pair_ids]
+        pass 
+
+        clean_flat_scores_1d = clean_avg_scores.view(-1)
+        clean_sort_pair_ids = torch.argsort(clean_flat_scores_1d, descending=True) # from high to low score 
+        clean_topk_pair_ids = clean_sort_pair_ids[:topk]
+        clean_topk_train_ids = clean_topk_pair_ids // clean_avg_scores.shape[1]
+        clean_topk_val_ids = clean_topk_pair_ids % clean_avg_scores.shape[1]
+        clean_topk_scores = clean_flat_scores_1d[clean_topk_pair_ids]
+        pass 
+
+        noise_topk_train_input_ids = [noise_input_ids[i] for i in noise_topk_train_ids]
+        noise_top_val_input_ids = [infl_input_ids[i] for i in noise_topk_val_ids]
+        noise_topk_train_strs = tokenizer.batch_decode(noise_topk_train_input_ids, skip_special_tokens=False)
+        noise_topk_train_labels = [noise_labels[i] for i in noise_topk_train_ids]
+        noise_topk_val_strs = tokenizer.batch_decode(noise_top_val_input_ids, skip_special_tokens=False)
+        noise_topk_val_labels = [inflset_labels[i] for i in noise_topk_val_ids]
+        noise_topk_val_preds = inflset_preds[noise_topk_val_ids]
+        pass
+
+        clean_topk_train_input_ids = [clean_input_ids[i] for i in clean_topk_train_ids]
+        clean_top_val_input_ids = [infl_input_ids[i] for i in clean_topk_val_ids]
+        clean_topk_train_strs = tokenizer.batch_decode(clean_topk_train_input_ids, skip_special_tokens=False)
+        clean_topk_train_labels = [clean_labels[i] for i in clean_topk_train_ids]
+        clean_topk_val_strs = tokenizer.batch_decode(clean_top_val_input_ids, skip_special_tokens=False)
+        clean_topk_val_labels = [inflset_labels[i] for i in clean_topk_val_ids]
+        clean_topk_val_preds = inflset_preds[clean_topk_val_ids]
+        pass 
+
+        all_data = [(noise_topk_train_strs, noise_topk_train_labels, noise_topk_val_strs, noise_topk_val_labels, noise_topk_val_preds, noise_topk_scores), 
+                    (clean_topk_train_strs, clean_topk_train_labels, clean_topk_val_strs, clean_topk_val_labels, clean_topk_val_preds, clean_topk_scores)]
+        all_pairs = []
+        for one_data_i, one_data in enumerate(all_data):
+            for train_str, train_label, val_str, val_label, val_pred, score in zip(*one_data):
+                all_pairs.append({ \
+                    "train_str": train_str, 
+                    "train_label": train_label.item(), 
+                    "val_str": val_str, 
+                    "val_label": val_label.item(), 
+                    "val_pred": val_pred.item(),
+                    "infl_score": score.item(),
+                    "is_noise": one_data_i == 0,
+                })
+        all_pairs.sort(key=lambda x: x["infl_score"], reverse=True)
+        pass
+        
+        results[infl_method] = all_pairs
+        
+    # save results to file
+
+    out_path = os.path.join(cwd, f'pairs_{task}_{seed}.json')
+    with open(out_path, 'w') as file:
+        json.dump(results, file)
+
     pass
 
 def finetune2(task = 'qnli',
@@ -1212,7 +1374,7 @@ def finetune2(task = 'qnli',
         torch.cuda.empty_cache()
 
 parser = argh.ArghParser()
-parser.add_commands([preprocess, init_checkpoint, finetune, grads, infl, infl_matrix, scores, ndr, finetune2])
+parser.add_commands([preprocess, init_checkpoint, finetune, grads, infl, infl_matrix, scores, ndr, finetune2, infl_noise])
 
 def test_infl_vs_infl_matrix(file1: str, file2: str):
     infl = torch.load(file1)
