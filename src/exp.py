@@ -801,6 +801,51 @@ matrix_infl_methods = {
 def is_embedding_module(module_name: str):
     return ('.word_embeddings.' in module_name) or ('.embed_tokens.' in module_name)
 
+def train_logits(task = "qnli", m_prefix: str = 'm_bl', batch_size=32, device = "cuda"):
+    ''' Routine is added post-factum to compute and save train set logits for given checkpoint '''
+    model_path = os.path.join(cwd, f'{m_prefix}_{task}_{seed}')
+
+    # todo check if reequires_grad is attached to embedding
+    lora_model = load_pretrained_LORA_model(model_name_or_path=model_path)
+    lora_model.to(device)
+    lora_model.eval()  
+
+    dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
+
+    datasets = load_from_disk(dataset_path) # add validation dataset 
+
+    trainset = datasets['train']#.select(range(100))
+    train_labels = trainset['labels']
+    trainset = trainset.remove_columns(['noise'])
+    tokenizer = load_tokenizer(model_path)
+    collator = DataCollatorWithPadding(tokenizer=tokenizer, padding="longest", return_tensors="pt")  
+
+    train_dataloader = DataLoader(trainset,
+                    shuffle=False, 
+                    collate_fn=collator,
+                    batch_size=batch_size)
+    
+    # predict loop 
+    train_logits = None
+    train_shift = 0
+    for batch in tqdm(train_dataloader):
+        batch = {k: v.to(device) for k, v in batch.items()}
+        with torch.no_grad():
+            outputs = lora_model(**batch)
+            if train_logits is None:
+                train_logits = torch.zeros((len(train_dataloader.dataset), lora_model.config.num_labels), device=outputs.logits.device, dtype = outputs.logits.dtype)
+            batch_size = outputs.logits.shape[0]
+            train_logits[train_shift:train_shift+batch_size] = outputs.logits   
+            train_shift += batch_size         
+
+    # save train_logits tensor to model folder 
+    train_preds = torch.argmax(train_logits, dim=-1)
+    accuracy = sum([1 if train_labels[i] == train_preds[i] else 0 for i in range(len(train_labels))]) / len(train_labels)
+    print(f"Train accuracy: {accuracy:.4f}")
+    train_logits_path = os.path.join(model_path, 'train_logits.pt')
+    torch.save(train_logits, train_logits_path)
+    pass
+
 # Mem koef NOTE: hf (1.1, 0.3), hf_we_ (2, 0.3), hf_we_topk (2, 0.3), cos (1.1, 0.3), cov (2, 0.3), datainf_one (1.1, 0.3), datainf (2, 0.3), 
 def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datainf_one,datainf", mem_koef: float = 2.0, mem_delta: float = 0.3,
                 i_prefix='i_bl', m_prefix='m_bl'):
@@ -981,10 +1026,14 @@ def load_ds_info(task_in_dir: str, task: str, with_input_ids = False):
         return noise_list, trainset_labels, inflset_labels, (train_input_ids, infl_input_ids)
     return noise_list, trainset_labels, inflset_labels
 
-def load_m_info(task_in_dir: str, task:str, m_prefix: str):
+def load_m_info(task_in_dir: str, task:str, m_prefix: str, with_train_logits = False):
     ''' Loads infl samples logits on the specified chehckpoint '''
     logits_m_path = os.path.join(task_in_dir, f'{m_prefix}_{task}_{seed}', "infl_logits.pt")
     logits = torch.load(logits_m_path)
+    if with_train_logits:
+        train_logits_path = os.path.join(task_in_dir, f'{m_prefix}_{task}_{seed}', "train_logits.pt")
+        train_logits = torch.load(train_logits_path)
+        return logits, train_logits
     return logits
 
 def ndr(task = "qnli", infl_methods: str = 'datainf', agg_methods: str = 'mean',
@@ -1175,8 +1224,15 @@ def infl_noise(task = "qnli", infl_methods: str = 'datainf',
     inflset_labels = torch.tensor(inflset_labels, device = device)
     model_path = os.path.join(cwd, f'{m_prefix}_{task}_{seed}')
     tokenizer = load_tokenizer(model_path)
-    inflset_logits = load_m_info(cwd, task, m_prefix).to(device)
+    inflset_logits, train_logits = load_m_info(cwd, task, m_prefix, with_train_logits=True)
+    inflset_logits = inflset_logits.to(device)
+    # train_logits = train_logits[:100]
+    train_logits = train_logits.to(device)
     inflset_preds = torch.argmax(inflset_logits, dim = -1)   
+    train_preds = torch.argmax(train_logits, dim = -1)
+
+    noise_preds = train_preds[noise_mask]
+    clean_preds = train_preds[~noise_mask]
 
     results = {}
 
@@ -1223,6 +1279,7 @@ def infl_noise(task = "qnli", infl_methods: str = 'datainf',
         noise_topk_train_labels = [noise_labels[i] for i in noise_topk_train_ids]
         noise_topk_val_strs = tokenizer.batch_decode(noise_top_val_input_ids, skip_special_tokens=False)
         noise_topk_val_labels = [inflset_labels[i] for i in noise_topk_val_ids]
+        noise_topk_train_preds = noise_preds[noise_topk_train_ids]
         noise_topk_val_preds = inflset_preds[noise_topk_val_ids]
         pass
 
@@ -1232,17 +1289,19 @@ def infl_noise(task = "qnli", infl_methods: str = 'datainf',
         clean_topk_train_labels = [clean_labels[i] for i in clean_topk_train_ids]
         clean_topk_val_strs = tokenizer.batch_decode(clean_top_val_input_ids, skip_special_tokens=False)
         clean_topk_val_labels = [inflset_labels[i] for i in clean_topk_val_ids]
+        clean_topk_train_preds = clean_preds[clean_topk_train_ids]
         clean_topk_val_preds = inflset_preds[clean_topk_val_ids]
         pass 
 
-        all_data = [(noise_topk_train_strs, noise_topk_train_labels, noise_topk_val_strs, noise_topk_val_labels, noise_topk_val_preds, noise_topk_scores), 
-                    (clean_topk_train_strs, clean_topk_train_labels, clean_topk_val_strs, clean_topk_val_labels, clean_topk_val_preds, clean_topk_scores)]
+        all_data = [(noise_topk_train_strs, noise_topk_train_labels, noise_topk_val_strs, noise_topk_val_labels, noise_topk_train_preds, noise_topk_val_preds, noise_topk_scores), 
+                    (clean_topk_train_strs, clean_topk_train_labels, clean_topk_val_strs, clean_topk_val_labels, clean_topk_train_preds, clean_topk_val_preds, clean_topk_scores)]
         all_pairs = []
         for one_data_i, one_data in enumerate(all_data):
-            for train_str, train_label, val_str, val_label, val_pred, score in zip(*one_data):
+            for train_str, train_label, val_str, val_label, train_pred, val_pred, score in zip(*one_data):
                 all_pairs.append({ \
                     "train_str": train_str, 
                     "train_label": train_label.item(), 
+                    "train_pred": train_pred.item(),
                     "val_str": val_str, 
                     "val_label": val_label.item(), 
                     "val_pred": val_pred.item(),
@@ -1374,7 +1433,7 @@ def finetune2(task = 'qnli',
         torch.cuda.empty_cache()
 
 parser = argh.ArghParser()
-parser.add_commands([preprocess, init_checkpoint, finetune, grads, infl, infl_matrix, scores, ndr, finetune2, infl_noise])
+parser.add_commands([preprocess, init_checkpoint, finetune, grads, infl, infl_matrix, scores, ndr, finetune2, infl_noise, train_logits])
 
 def test_infl_vs_infl_matrix(file1: str, file2: str):
     infl = torch.load(file1)
