@@ -1,7 +1,7 @@
 #!/bin/bash -l
-#SBATCH --job-name=m-tlogit
+#SBATCH --job-name=m-proba
 #SBATCH --time=96:00:00
-#SBATCH --output 4-tlogit-%a.out
+#SBATCH --output 4-proba-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/mistral
 #SBATCH -p hpg-ai
 #SBATCH --gpus=1 # 1 GPU
@@ -20,7 +20,8 @@ task_cwd=/blue/anshumanc.usf/nn-infl/mistral/$task
 for run_id in {0..9}; do
     echo "Calc checkpoint train logits $task $run_id"
     HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
-        /home/dvitel.usf/nn-infl/src/exp.py train-logits --task=$task --m-prefix=m_bl --batch-size=64
+        /home/dvitel.usf/nn-infl/src/exp.py set-logits --task=$task --m-prefix=m_bl \
+        --batch-size=64 --set-name=test --softmaxed
 
     echo "Done calc train logits $task $run_id"
     echo "----------------------------------"

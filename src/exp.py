@@ -354,6 +354,107 @@ def finetune(task = 'mrpc', device = 'cuda', lr = 3e-4, batch_size = 32, num_epo
     with torch.no_grad():
         torch.cuda.empty_cache()
 
+def cancel_eff(task = 'qnli',  
+               m_prefix = 'm_bl', device = 'cuda',
+                group_file: str = './groups.json'):
+    ''' Computes cancelation effect metric for provided checkpoint 
+        Passess train dataset once (1 epoch) one by one through the model and aggregates the grads of modules (including WE).
+        Cancel = sum(abs(grad)) / norm(sum(grad))
+    '''
+    config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
+    with open(config_path, 'r') as file:
+        config = json.load(file)    
+
+    with open(os.path.join(cwd, group_file), 'r') as file:
+        module_groups_regex = json.load(file)
+    module_groups_patterns = {name: re.compile(pattern) for name, pattern in module_groups_regex.items()}
+
+    unfreeze_regex = config.get('unfreeze_regex', None)
+    dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
+    model_path = os.path.join(cwd, f'{m_prefix}_{task}_{seed}')
+    train_dataloader, _, _, _, _, _ = \
+        build_loaders(dataset_path, model_path, batch_size=1, shuffle_train=False)
+    
+    lora_model = load_pretrained_LORA_model(model_name_or_path=model_path, unfreeze_modules_regex=unfreeze_regex)
+    lora_model.to(device)
+    lora_model.eval() #no norm and dropout
+
+    module_names = [name for name, p in lora_model.named_parameters() if p.requires_grad]
+
+    module_groups = defaultdict(list)
+    for group_name, pattern in module_groups_patterns.items():
+        for module_name in module_names:
+            if pattern.match(module_name):
+                module_groups[module_name].append(group_name)        
+
+
+    module_grads_l1 = {}
+    module_grads_sum = {}
+    
+    for step, batch in enumerate(tqdm(train_dataloader)):
+        lora_model.zero_grad()
+        batch.to(device)
+        outputs = lora_model(**batch)
+        loss = outputs.loss
+        loss.backward()
+        for name, param in lora_model.named_parameters():
+            if param.requires_grad:
+                if name in module_grads_l1:
+                    module_grads_l1[name] += param.grad.view(-1).abs()
+                else:
+                    module_grads_l1[name] = param.grad.view(-1).abs()
+                if name in module_grads_sum:
+                    module_grads_sum[name] += param.grad.view(-1)
+                else:
+                    module_grads_sum[name] = param.grad.view(-1).clone()
+    module_every_cancellation = {}
+    module_cancellation = {}
+    group_cancellation = {}
+    group_every_cancellation = {}
+    
+    for module_name in module_names:
+        g_l1 = module_grads_l1[module_name]
+        g_sum = module_grads_sum[module_name]
+        g_l1_nonzero_ids = torch.nonzero(g_l1, as_tuple=False)
+        g_l1_nz = g_l1[g_l1_nonzero_ids]
+        g_sum_nz = g_sum[g_l1_nonzero_ids]
+        module_every_cancellation[module_name] = g_l1_nz / g_sum_nz.abs()
+        mc = np.array([g_l1.sum().item(), g_sum.abs().sum().item(), len(g_l1_nonzero_ids), torch.norm(g_sum).item()])
+        module_cancellation[module_name] = mc
+        for group_name in module_groups.get(module_name, []):
+            if group_name in module_cancellation:
+                group_cancellation[group_name] += mc[:-1]
+            else:
+                group_cancellation[group_name] = mc[:-1].copy()
+            group_every_cancellation.setdefault(group_name, []).append(module_every_cancellation[module_name])
+        del g_l1, g_sum
+
+    all_results = {}
+    for module_name in module_names:
+        module_results = all_results.setdefault(module_name, {})
+        mc = module_cancellation[module_name]
+        module_results['cancellation'] = mc[0] / mc[1]
+        module_results['num_params'] = mc[2]
+        module_results['cancellation_l2'] = mc[0] / mc[3]
+        module_results["median_cancellation"] = module_every_cancellation[module_name].median().item()
+        module_results["min_cancellation"] = module_every_cancellation[module_name].min().item()
+        module_results["max_cancellation"] = module_every_cancellation[module_name].max().item()
+
+    for group_name, group_c in group_cancellation.items():
+        group_results = all_results.setdefault(group_name, {})
+        group_results['cancellation'] = group_c[0] / group_c[1]
+        group_results['num_params'] = group_c[2]
+        cls = torch.cat(group_every_cancellation[group_name])
+        group_results["median_cancellation"] = cls.median().item()
+        group_results["min_cancellation"] = cls.min().item()
+        group_results["max_cancellation"] = cls.max().item()
+        del cls
+
+    out_folder = os.path.join(model_path, f'cancellation.json')
+    with open(out_folder, 'w') as file:
+        json.dump(all_results, file)
+    pass 
+
 def grads(task = 'mrpc', no_val = False, return_grads = False, config = None, m_prefix = 'm_b'):
     ''' Computes gradients for modules of the model'''
     if config is None:
@@ -801,7 +902,8 @@ matrix_infl_methods = {
 def is_embedding_module(module_name: str):
     return ('.word_embeddings.' in module_name) or ('.embed_tokens.' in module_name)
 
-def train_logits(task = "qnli", m_prefix: str = 'm_bl', batch_size=32, device = "cuda"):
+def set_logits(task = "qnli", m_prefix: str = 'm_bl', batch_size=32, device = "cuda",
+                set_name = 'train', softmaxed = False):
     ''' Routine is added post-factum to compute and save train set logits for given checkpoint '''
     model_path = os.path.join(cwd, f'{m_prefix}_{task}_{seed}')
 
@@ -814,7 +916,7 @@ def train_logits(task = "qnli", m_prefix: str = 'm_bl', batch_size=32, device = 
 
     datasets = load_from_disk(dataset_path) # add validation dataset 
 
-    trainset = datasets['train']#.select(range(100))
+    trainset = datasets[set_name]#.select(range(100))
     train_labels = trainset['labels']
     trainset = trainset.remove_columns(['noise'])
     tokenizer = load_tokenizer(model_path)
@@ -826,24 +928,29 @@ def train_logits(task = "qnli", m_prefix: str = 'm_bl', batch_size=32, device = 
                     batch_size=batch_size)
     
     # predict loop 
-    train_logits = None
+    logits = None
     train_shift = 0
     for batch in tqdm(train_dataloader):
         batch = {k: v.to(device) for k, v in batch.items()}
         with torch.no_grad():
             outputs = lora_model(**batch)
-            if train_logits is None:
-                train_logits = torch.zeros((len(train_dataloader.dataset), lora_model.config.num_labels), device=outputs.logits.device, dtype = outputs.logits.dtype)
+            if logits is None:
+                logits = torch.zeros((len(train_dataloader.dataset), lora_model.config.num_labels), device=outputs.logits.device, dtype = outputs.logits.dtype)
             batch_size = outputs.logits.shape[0]
-            train_logits[train_shift:train_shift+batch_size] = outputs.logits   
+            logits[train_shift:train_shift+batch_size] = outputs.logits   
             train_shift += batch_size         
 
-    # save train_logits tensor to model folder 
-    train_preds = torch.argmax(train_logits, dim=-1)
+    # save logits tensor to model folder 
+    train_preds = torch.argmax(logits, dim=-1)
     accuracy = sum([1 if train_labels[i] == train_preds[i] else 0 for i in range(len(train_labels))]) / len(train_labels)
-    print(f"Train accuracy: {accuracy:.4f}")
-    train_logits_path = os.path.join(model_path, 'train_logits.pt')
-    torch.save(train_logits, train_logits_path)
+    print(f"Accuracy: {accuracy:.4f}")
+    if softmaxed:
+        logits = torch.nn.functional.softmax(logits, dim=-1)
+        prefix = "probas"
+    else:
+        prefix = "logits"
+    logits_path = os.path.join(model_path, f'{set_name}_{prefix}.pt')
+    torch.save(logits, logits_path)
     pass
 
 # Mem koef NOTE: hf (1.1, 0.3), hf_we_ (2, 0.3), hf_we_topk (2, 0.3), cos (1.1, 0.3), cov (2, 0.3), datainf_one (1.1, 0.3), datainf (2, 0.3), 
@@ -1433,7 +1540,7 @@ def finetune2(task = 'qnli',
         torch.cuda.empty_cache()
 
 parser = argh.ArghParser()
-parser.add_commands([preprocess, init_checkpoint, finetune, grads, infl, infl_matrix, scores, ndr, finetune2, infl_noise, train_logits])
+parser.add_commands([preprocess, init_checkpoint, finetune, grads, infl, infl_matrix, scores, ndr, finetune2, infl_noise, set_logits, cancel_eff])
 
 def test_infl_vs_infl_matrix(file1: str, file2: str):
     infl = torch.load(file1)
