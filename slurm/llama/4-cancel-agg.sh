@@ -19,7 +19,7 @@ run_ids="0,1,2,3,4,5,6,7,8,9"
 
 echo "Cancel agg $tasks $run_ids"
 HF_TOKEN=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 INFL_SEED=0 INFL_CWD=$task_cwd python \
-    /home/dvitel.usf/nn-infl/src/exp.py combine-cancel --tasks=$task --m-prefix=m_bl \
+    /home/dvitel.usf/nn-infl/src/exp.py combine-cancel --tasks=$tasks --m-prefix=m_bl \
     --run-ids=$run_ids --group-file=./groups.json
 
 echo "Cancel agg $tasks $run_ids"
