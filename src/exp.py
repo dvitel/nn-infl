@@ -455,6 +455,38 @@ def cancel_eff(task = 'qnli',
         json.dump(all_results, file)
     pass 
 
+def combine_cancel(tasks = "qnli", m_prefix = "m_bl", run_ids = "0,1,2,3,4,5,6,7,8,9", 
+                   group_file = './groups.json'):
+    ''' Combines cancellation results into one dataframe saved in cwd'''
+    import pandas as pd
+    if group_file != '':
+        with open(os.path.join(cwd, group_file), 'r') as file:
+            module_groups_regex = json.load(file)
+        selected_layers = list(module_groups_regex.keys())
+    else:
+        selected_layers = []
+    tasks = tasks.split(',')
+    run_ids = [int(x) for x in run_ids.split(',')]
+    if len(selected_layers) == 0:
+        selected_layers = None
+    all_data = []
+    for task in tasks:
+        for seed in run_ids:
+            cancel_path = os.path.join(cwd, task, f'{m_prefix}_{task}_{seed}', f'cancellation.json')
+            with open(cancel_path, 'r') as f:
+                cancellations = json.load(f)
+            if selected_layers is None:
+                selected_layers = cancellations.keys()
+            for layer_name in selected_layers:
+                if layer_name not in cancellations:
+                    continue
+                metrics = cancellations[layer_name]
+                all_data.append({'task': task, 'layer': layer_name, 'run_id': seed, **metrics})
+    df = pd.DataFrame(all_data).set_index(['task', 'layer', 'run_id'])
+    df.to_pickle(os.path.join(cwd, f'cancellation_{m_prefix}.pkl'))
+    pass
+
+
 def grads(task = 'mrpc', no_val = False, return_grads = False, config = None, m_prefix = 'm_b'):
     ''' Computes gradients for modules of the model'''
     if config is None:
@@ -1540,7 +1572,7 @@ def finetune2(task = 'qnli',
         torch.cuda.empty_cache()
 
 parser = argh.ArghParser()
-parser.add_commands([preprocess, init_checkpoint, finetune, grads, infl, infl_matrix, scores, ndr, finetune2, infl_noise, set_logits, cancel_eff])
+parser.add_commands([preprocess, init_checkpoint, finetune, grads, infl, infl_matrix, scores, ndr, finetune2, infl_noise, set_logits, cancel_eff, combine_cancel])
 
 def test_infl_vs_infl_matrix(file1: str, file2: str):
     infl = torch.load(file1)
