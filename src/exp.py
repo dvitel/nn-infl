@@ -422,7 +422,7 @@ def cancel_eff(task = 'qnli',
         mc = np.array([g_l1.sum().item(), g_sum.abs().sum().item(), len(g_l1_nonzero_ids), torch.norm(g_sum).item()])
         module_cancellation[module_name] = mc
         for group_name in module_groups.get(module_name, []):
-            if group_name in module_cancellation:
+            if group_name in group_cancellation:
                 group_cancellation[group_name] += mc[:-1]
             else:
                 group_cancellation[group_name] = mc[:-1].copy()

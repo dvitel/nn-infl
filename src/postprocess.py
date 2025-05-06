@@ -3461,23 +3461,6 @@ def draw_perf_diffs(metric_name: str = "best_accuracy_1",
     pass
 
 
-def df_cancellations(base_path, tasks = benchmark, m_prefix = "m_bl", run_ids = [42], selected_layers = None):
-    all_data = []
-    for task in tasks:
-        for seed in run_ids:
-            cancel_path = os.path.join(base_path, task, f'{m_prefix}_{task}_{seed}', f'cancellation.json')
-            with open(cancel_path, 'r') as f:
-                cancellations = json.load(f)
-            if selected_layers is None:
-                selected_layers = cancellations.keys()
-            for layer_name in selected_layers:
-                if layer_name not in cancellations:
-                    continue
-                metrics = cancellations[layer_name]
-                all_data.append({'task': task, 'layer': layer_name, 'run_id': seed, **metrics})
-    df = pd.DataFrame(all_data).set_index(['task', 'layer', 'run_id'])
-    pass
-
 if __name__ == "__main__":
 
     
