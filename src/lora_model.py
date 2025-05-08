@@ -156,8 +156,8 @@ def train_LORA_model(model: torch.nn.Module,
         device="cuda",
         num_epochs=10,
         lr=1e-4,
-        compute_cancellation = False,
-        compute_gold_val_predictions = False,
+        # compute_cancellation = False,
+        # compute_gold_val_predictions = False,
         best_checkpoint_path = None,
         last_checkpoint_path = None,
         best_loss_model_path = None):
@@ -184,43 +184,43 @@ def train_LORA_model(model: torch.nn.Module,
 
     model.to(device)
     eval_metrics = {}
-    weights_delta = {}
-    weights_delta_abs = {}
-    weights_delta_norms = {}
-    grads_abs = {}
-    grads_norms = {}
-    current_lr = lr
-    cancel_norm = {}
-    cancel_abs = {}
-    gold_val_predictions = []
+    # weights_delta = {}
+    # weights_delta_abs = {}
+    # weights_delta_norms = {}
+    # grads_abs = {}
+    # grads_norms = {}
+    # current_lr = lr
+    # cancel_norm = {}
+    # cancel_abs = {}
+    # gold_val_predictions = []
     best_infl_loss = np.inf
     best_infl_accuracy = 0
     for epoch in range(num_epochs):
         model.train()
-        if (epoch == (num_epochs - 1)) and compute_cancellation: 
-            weights_before = {}
-            for name, param in model.named_parameters():
-                if param.requires_grad:
-                    weights_before[name] = param.clone().detach()
-            current_lr = lr_scheduler.get_last_lr()[0]
-            cancellation_data_loader = DataLoader(train_dataloader.dataset, batch_size=1, shuffle=False, collate_fn=train_dataloader.collate_fn)
-            for step, batch in enumerate(tqdm(cancellation_data_loader)):
-                optimizer.zero_grad()
-                batch.to(device)
-                outputs = model(**batch)
-                loss = outputs.loss
-                loss.backward()
-                for name, param in model.named_parameters():
-                    if param.requires_grad:
-                        if name in grads_abs:
-                            grads_abs[name] += torch.abs(param.grad)
-                        else:
-                            grads_abs[name] = torch.abs(param.grad)
-                        if name in grads_norms:
-                            grads_norms[name] += torch.norm(param.grad.view(-1))
-                        else:
-                            grads_norms[name] = torch.norm(param.grad.view(-1))
-            optimizer.zero_grad()
+        # if (epoch == (num_epochs - 1)) and compute_cancellation: 
+        #     weights_before = {}
+        #     for name, param in model.named_parameters():
+        #         if param.requires_grad:
+        #             weights_before[name] = param.clone().detach()
+        #     current_lr = lr_scheduler.get_last_lr()[0]
+        #     cancellation_data_loader = DataLoader(train_dataloader.dataset, batch_size=1, shuffle=False, collate_fn=train_dataloader.collate_fn)
+        #     for step, batch in enumerate(tqdm(cancellation_data_loader)):
+        #         optimizer.zero_grad()
+        #         batch.to(device)
+        #         outputs = model(**batch)
+        #         loss = outputs.loss
+        #         loss.backward()
+        #         for name, param in model.named_parameters():
+        #             if param.requires_grad:
+        #                 if name in grads_abs:
+        #                     grads_abs[name] += torch.abs(param.grad)
+        #                 else:
+        #                     grads_abs[name] = torch.abs(param.grad)
+        #                 if name in grads_norms:
+        #                     grads_norms[name] += torch.norm(param.grad.view(-1))
+        #                 else:
+        #                     grads_norms[name] = torch.norm(param.grad.view(-1))
+        #     optimizer.zero_grad()
 
         # NEXT is for debugging embedding shrinking
         # emb.weight.grad[~torch.isin(torch.arange(emb.weight.shape[0], device='cuda'), emb.vocab_mapping[batch['input_ids']].unique())]
@@ -238,29 +238,29 @@ def train_LORA_model(model: torch.nn.Module,
             lr_scheduler.step()
             optimizer.zero_grad()
 
-        if (epoch == (num_epochs - 1)) and compute_cancellation: 
-            weights_after = {}
-            for name, param in model.named_parameters():
-                if param.requires_grad:
-                    weights_after[name] = param.clone().detach()
+        # if (epoch == (num_epochs - 1)) and compute_cancellation: 
+        #     weights_after = {}
+        #     for name, param in model.named_parameters():
+        #         if param.requires_grad:
+        #             weights_after[name] = param.clone().detach()
 
-            for name in weights_before.keys():            
-                weights_delta[name] = weights_after[name] - weights_before[name]
-                weights_delta_abs[name] = torch.abs(weights_delta[name])
-                # weights_delta_abs[name] += 1e-20 # to avoid division by zero
-                weights_delta_norms[name] = torch.norm(weights_delta[name].view(-1))
-            for name in grads_abs.keys():
-                grads_abs[name] *= current_lr   
-            for name in grads_norms.keys():
-                grads_norms[name] *= current_lr                     
-            for name in grads_abs.keys():
-                # cancel_abs[name] = torch.mean(grads_abs[name] / weights_delta_abs[name]).item()
-                updated_grads = (grads_abs[name] > 0).view(-1)
-                grads_to_consider = (grads_abs[name] / weights_delta_abs[name]).view(-1)[updated_grads]
-                cancel_abs[name] = torch.median(grads_to_consider).item()
-            for name in grads_norms.keys():
-                cancel_norm[name] = (grads_norms[name] / weights_delta_norms[name]).item()
-            del weights_before, weights_after, weights_delta, grads_abs, weights_delta_abs, weights_delta_norms
+        #     for name in weights_before.keys():            
+        #         weights_delta[name] = weights_after[name] - weights_before[name]
+        #         weights_delta_abs[name] = torch.abs(weights_delta[name])
+        #         # weights_delta_abs[name] += 1e-20 # to avoid division by zero
+        #         weights_delta_norms[name] = torch.norm(weights_delta[name].view(-1))
+        #     for name in grads_abs.keys():
+        #         grads_abs[name] *= current_lr   
+        #     for name in grads_norms.keys():
+        #         grads_norms[name] *= current_lr                     
+        #     for name in grads_abs.keys():
+        #         # cancel_abs[name] = torch.mean(grads_abs[name] / weights_delta_abs[name]).item()
+        #         updated_grads = (grads_abs[name] > 0).view(-1)
+        #         grads_to_consider = (grads_abs[name] / weights_delta_abs[name]).view(-1)[updated_grads]
+        #         cancel_abs[name] = torch.median(grads_to_consider).item()
+        #     for name in grads_norms.keys():
+        #         cancel_norm[name] = (grads_norms[name] / weights_delta_norms[name]).item()
+        #     del weights_before, weights_after, weights_delta, grads_abs, weights_delta_abs, weights_delta_norms
 
         model.eval()
         infl_loss = []
@@ -310,9 +310,9 @@ def train_LORA_model(model: torch.nn.Module,
                 references=references,
             )
 
-            if (epoch == (num_epochs - 1)) and compute_gold_val_predictions:
-                batch_gold_preds = outputs.logits[torch.arange(outputs.logits.shape[0]), references].cpu().tolist()
-                gold_val_predictions.extend(batch_gold_preds)
+            # if (epoch == (num_epochs - 1)) and compute_gold_val_predictions:
+            #     batch_gold_preds = outputs.logits[torch.arange(outputs.logits.shape[0]), references].cpu().tolist()
+            #     gold_val_predictions.extend(batch_gold_preds)
 
         # eval_metric = metric.compute()
         # train_accuracy = train_accuracy_metric.compute()["accuracy"]
@@ -342,12 +342,12 @@ def train_LORA_model(model: torch.nn.Module,
         print(f"Epoch {(epoch+1)}:", metrics)
         for key, item in metrics.items():
             eval_metrics.setdefault(key, []).append(item)
-    if len(cancel_norm) > 0:
-        eval_metrics["cancel_norm"] = cancel_norm
-    if len(cancel_abs) > 0:
-        eval_metrics["cancel_abs"] = cancel_abs        
-    if len(gold_val_predictions) > 0:
-        eval_metrics["gold_val_predictions"] = gold_val_predictions
+    # if len(cancel_norm) > 0:
+    #     eval_metrics["cancel_norm"] = cancel_norm
+    # if len(cancel_abs) > 0:
+    #     eval_metrics["cancel_abs"] = cancel_abs        
+    # if len(gold_val_predictions) > 0:
+    #     eval_metrics["gold_val_predictions"] = gold_val_predictions
     if last_checkpoint_path is not None:
         save_checkpoint(model, last_checkpoint_path)
         if infl_logits is not None:

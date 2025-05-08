@@ -296,8 +296,8 @@ def finetune(task = 'mrpc', device = 'cuda', lr = 3e-4, batch_size = 32, num_epo
         best_loss_model_path = os.path.join(cwd, f'm_bl_{task}_{seed}')
         last_model_path = os.path.join(cwd, f'm_l_{task}_{seed}')
 
-    compute_cancellation = not fast
-    compute_gold_val_predictions = not fast
+    # compute_cancellation = not fast
+    # compute_gold_val_predictions = not fast
 
     # unfreeze_regex = config.get('unfreeze_regex', None)
 
@@ -323,8 +323,8 @@ def finetune(task = 'mrpc', device = 'cuda', lr = 3e-4, batch_size = 32, num_epo
 
     
     eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, infl_dataloader, device, num_epochs, lr,
-                                    compute_cancellation=compute_cancellation, 
-                                    compute_gold_val_predictions=compute_gold_val_predictions, 
+                                    # compute_cancellation=compute_cancellation, 
+                                    # compute_gold_val_predictions=compute_gold_val_predictions, 
                                     best_checkpoint_path = best_model_path,
                                     last_checkpoint_path = last_model_path,
                                     best_loss_model_path = best_loss_model_path)
