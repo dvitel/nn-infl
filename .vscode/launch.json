@@ -28,6 +28,22 @@
             }
         },
         {
+            "name": "Init Qwen",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "init-checkpoint", "--task=qnli", "--model=Qwen/Qwen2.5-0.5B", 
+                "--unfreeze-regex=.*\\.embed_tokens\\..*", 
+                "--lora-targets=q_proj,v_proj"
+            ],
+            "env": {
+                "INFL_SEED": "42",
+                "INFL_CWD": "./data/dev/qwen/qnli"
+            }
+        },        
+        {
             "name": "Info Llama",
             "type": "debugpy",
             "request": "launch",
@@ -86,6 +102,21 @@
                 "HF_TOKEN": "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"
             }
         },        
+        {
+            "name": "Preprocess: GLUE QNLI QWEN",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "preprocess", "--task=qnli", "--tokenizer-name=Qwen/Qwen2.5-0.5B"
+            ],
+            "env": {
+                "INFL_SEED": "42",
+                "INFL_CWD": "./data/dev/qwen/qnli",
+                "HF_TOKEN": "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"
+            }
+        },             
         {
             "name": "Preprocess: GLUE QNLI Mistral",
             "type": "debugpy",
@@ -283,7 +314,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "ndr", "--task=qnli", "--infl-methods=hf,datainf", "--agg-methods=mean,dir,rank", "--m-prefix=m_bl", "--i-prefix=i_bl", "--ndr-prefix=ndr_bl", "--group-file=./groups.json"
+                "ndr", "--task=qnli", "--infl-methods=hf,datainf", "--agg-methods=mean,mean_10,mean_50,dir,rank,commonset-20,commonsubset-30", "--m-prefix=m_bl", "--i-prefix=i_bl", "--ndr-prefix=ndr_bl", "--group-file=./groups.json"
             ],
             "env": {
                 "INFL_SEED": "42",
@@ -303,7 +334,63 @@
                 "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev/roberta/qnli"
             }
+        },          
+        {
+            "name": "NOISE: GLUE QNLI on DistilRoberta",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "infl-noise", "--task=qnli", "--infl-methods=hf", "--m-prefix=m_bl", "--i-prefix=i_bl"
+            ],
+            "env": {
+                "INFL_SEED": "42",
+                "INFL_CWD": "./data/dev/roberta/qnli"
+            }
         },                
+        {
+            "name": "Logits: GLUE QNLI on DistilRoberta",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "set-logits", "--task=qnli", "--m-prefix=m_bl", "--set-name=test"
+            ],
+            "env": {
+                "INFL_SEED": "42",
+                "INFL_CWD": "./data/dev/roberta/qnli"
+            }
+        },                
+        {
+            "name": "Cancellation: GLUE QNLI on DistilRoberta",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "cancel-eff", "--task=qnli", "--m-prefix=m_bl", "--group-file=../groups.json"
+            ],
+            "env": {
+                "INFL_SEED": "42",
+                "INFL_CWD": "./data/dev/roberta/qnli"
+            }
+        },           
+        {
+            "name": "Cancel Agg: GLUE QNLI on DistilRoberta",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "combine-cancel", "--tasks=qnli", "--m-prefix=m_bl", "--run-ids=42", "--group-file=./groups.json"
+            ],
+            "env": {
+                "INFL_SEED": "42",
+                "INFL_CWD": "./data/dev/roberta"
+            }
+        },               
         {
             "name": "Finetune2: GLUE QNLI on DistilRoberta",
             "type": "debugpy",

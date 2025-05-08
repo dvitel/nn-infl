@@ -2952,7 +2952,8 @@ def where_is_the_noise(base_dir_path: str, task: str, infl_method: str,
 network_layers = {
     "roberta": ['WE', '00-05', '06-11', '12-17', '18-23', 'CL'],
     "llama": ['WE', '00-03', '04-07', '08-11', '12-15', 'CL'],
-    "mistral": ['WE', '00-07', '08-15', '16-23', '24-31', 'CL']
+    "mistral": ['WE', '00-07', '08-15', '16-23', '24-31', 'CL'],
+    "qwen": ['WE', '00-06', '07-13', '14-20', '21-27', 'CL'],
 }
 
 def ndr_test():
