@@ -1486,8 +1486,8 @@ def finetune2(task = 'qnli',
     # model = config['model']
     batch_size = config['batch_size']
     # target_modules = config['target_modules']
-    cancel_abs = []
-    cancel_norm = []
+    # cancel_abs = []
+    # cancel_norm = []
     scores_dict = torch.load(scores_path)
     scores = scores_dict[(infl_method, agg_method, module_name)]
     train_idxs = torch.argsort(scores)
@@ -1531,10 +1531,10 @@ def finetune2(task = 'qnli',
     tokenizer.save_pretrained(last_model_path)
 
     metric_file = os.path.join(cwd, metrics_file)
-    old_gold_val_predictions = np.array(config['finetune']['gold_val_predictions'])
-    new_gold_val_predictions = np.array(eval_metrics['gold_val_predictions'])
-    logits_change = (new_gold_val_predictions - old_gold_val_predictions).mean()
-    eval_metrics['logits_change'] = logits_change
+    # old_gold_val_predictions = np.array(config['finetune']['gold_val_predictions'])
+    # new_gold_val_predictions = np.array(eval_metrics['gold_val_predictions'])
+    # logits_change = (new_gold_val_predictions - old_gold_val_predictions).mean()
+    # eval_metrics['logits_change'] = logits_change
 
     # noise detection rate metrics
     noise_mask = torch.tensor(noise_list, device = train_idxs.device)
@@ -1557,11 +1557,11 @@ def finetune2(task = 'qnli',
     eval_metrics["ndr_curve"] = noise_detection_curve.cpu().tolist()
     eval_metrics["first_finetune"] = config['finetune']
 
-    if len(cancel_abs) > 0:
-        eval_metrics['cancel_abs'] = np.mean(cancel_abs)
-    if len(cancel_norm) > 0:
-        eval_metrics['cancel_norm'] = np.mean(cancel_norm)
-    del eval_metrics['gold_val_predictions']
+    # if len(cancel_abs) > 0:
+    #     eval_metrics['cancel_abs'] = np.mean(cancel_abs)
+    # if len(cancel_norm) > 0:
+    #     eval_metrics['cancel_norm'] = np.mean(cancel_norm)
+    # del eval_metrics['gold_val_predictions']
     with open(metric_file, "a") as f:                
         fcntl.flock(f, fcntl.LOCK_EX)
         f.write(json.dumps({**eval_metrics, 'config': finetune2_config}) + "\n")
