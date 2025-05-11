@@ -1991,6 +1991,7 @@ def compute_ndr_metrics_table(base_dir_path: str, task='qnli',
     for file_name_with_ext in os.listdir(task_in_dir):
         if not file_name_with_ext.startswith(i_prefix):
             continue
+        print(f"Processing {file_name_with_ext}")
         file_name = file_name_with_ext.split('.')[0]
         fine_name_parts = file_name[len(i_prefix):].split('_')[1:]
         *method_parts, _, run_id_str = fine_name_parts
