@@ -1520,7 +1520,6 @@ def finetune2(task = 'qnli',
     #                             all_token_ids = all_token_ids, mapping_tensor = mapping_tensor)
             
     eval_metrics = train_LORA_model(lora_model, train_dataloader, eval_dataloader, infl_dataloader, device, num_epochs, lr,
-                                    compute_gold_val_predictions=True,
                                     best_checkpoint_path=best_model_path,
                                     best_loss_model_path = best_loss_model_path,
                                     last_checkpoint_path=last_model_path)                                    
