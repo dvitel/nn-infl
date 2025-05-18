@@ -1065,7 +1065,7 @@ def get_df_from_file(metric_file: str):
         min_infl_loss = np.min(infl_loss)        
         infl_loss_delta = min_infl_loss - min_infl_loss0
 
-        logits_change = r["logits_change"]
+        # logits_change = r["logits_change"]
 
         auc_ndr = r["auc_ndr"]
         filtered = r["filtered"]
@@ -1101,7 +1101,7 @@ def get_df_from_file(metric_file: str):
                "best_accuracy_delta": accuracy_delta,
                "best_infl_accuracy_delta": infl_accuracy_delta,
                 "infl_loss_delta": infl_loss_delta,
-               "logits_change": logits_change,
+            #    "logits_change": logits_change,
                "noise_30": filtered,
                "auc_ndr": auc_ndr,
 
@@ -1793,7 +1793,7 @@ def draw_all_tun2_metric(base_path: str, tasks = benchmark, metric_name: str = "
     
     tasks_metrics = {}
     for task in tasks:
-        infile = os.path.join(base_path, f"{task}-bl.jsonlist")
+        infile = os.path.join(base_path, "metrics", f"{task}-bl.jsonlist")
         with open(infile, 'r') as f:
             json_lines = f.readlines()
         all_metrics = [json.loads(l) for l in json_lines]
@@ -3651,7 +3651,7 @@ if __name__ == "__main__":
     # cnts = {s:c for s,c in counts.items() if len(c) < 10}
 
 
-    network = "llama"
+    network = "mistral"
     group_file = "./groups.json"
     base_path = f"data/{network}"
     selected_layers = network_layers[network]
@@ -3665,16 +3665,19 @@ if __name__ == "__main__":
 
     infl_method_names = ["hf_we_", "hf_we_topk_10",  "hf", "cos", "datainf", "denoise", "rand"]
     agg_method_names = ["mean", '']
-    setup_interactions(base_path, use_ndr=False, metric_name="best_accuracy_1",
-                        agg_method_names = agg_method_names, dom_threshold = 0.5,
-                        infl_method_names=infl_method_names, suffix="-mean")    
+    res_suffix = "bl"
+    # setup_interactions(base_path, use_ndr=False, metric_name="best_accuracy_1",
+    #                     agg_method_names = agg_method_names, dom_threshold = 0.5,
+    #                     infl_method_names=infl_method_names, #suffix="-mean",
+    #                     res_suffix=res_suffix)    
     pass 
 
     # for i, columns in enumerate([["datainf"], ["hf_we_", "hf_we_topk_10",  "hf"], ["cos"]]):
     #     setup_interactions(base_path, use_ndr=False, metric_name="best_accuracy_1",
     #                         agg_method_names = ["mean"], selected_layers = selected_layers,
     #                         infl_method_names=columns, dom_threshold = 0.5,
-    #                         suffix = f'-MN{i}')
+    #                         res_suffix=res_suffix, suffix = f'-MN{i}')
+    pass
     
     # dfs = []
     # for i in range(3):
@@ -3695,7 +3698,8 @@ if __name__ == "__main__":
     base_paths = [
         ('Roberta-Large', 'data/roberta'),
         ('Llama-3.2 1B', 'data/llama'),
-        ('Mistral 7B', 'data/mistral')
+        ('Mistral 7B', 'data/mistral'),
+        ('Qwen-2.5 1.5B', 'data/qwen'),
     ]
     # draw_all_models_corr_heatmap(base_paths, noise_only = noise_only)
     pass
@@ -3711,7 +3715,7 @@ if __name__ == "__main__":
     # pass
 
     # run_spearman_total(out_folder=base_path, layers = selected_layers) #, run_ids = [0,1,2,3,4])
-    create_tun2_agg_metrics_table(out_folder=base_path)
+    # create_tun2_agg_metrics_table(out_folder=base_path, res_suffix = res_suffix)
     # draw_perf_diffs(out_folder = base_path, layers = selected_layers,
     #                 pvalue = 0.1) # run_ids = [0,1,2,3,4])
     pass
@@ -3765,9 +3769,9 @@ if __name__ == "__main__":
     #                   agg_method_names=agg_method_names)
     # process_ndr_table(base_path, tasks=benchmark, with_row_id=False,
     #                     layers=selected_layers, agg_method_names=agg_method_names)
-    process_ndr_table(base_path, tasks=benchmark, with_row_id=False, custom_suffix = "-hf",
-                        agg_method_names=['vote2-c'],
-                        infl_method_names=['hf'])
+    # process_ndr_table(base_path, tasks=benchmark, with_row_id=False, custom_suffix = "-hf",
+    #                     agg_method_names=['vote2-c'],
+    #                     infl_method_names=['hf'])
     # draw_noise_distr(base_path, tasks=['qnli'], layers = selected_layers, suffix="qnli-n", agg_name="mean",
     #                         figsize = (8,2), no_left_no_bottom = True)
     # pass
@@ -3881,11 +3885,26 @@ if __name__ == "__main__":
         ('rand', '', ''): {'color': 'gray', 'legend_name': 'Random', 'legend_order': 8},        
     }
 
-    # draw_all_tun2_metric(base_path, selected_methods=mistral_selected_methods)
+    qwen_selected_methods = {
+        ('denoise', '', ''): {'color': 'gray', 'legend_name': 'Full', 'legend_order': -1},
+        # ('hf_we_', 'mean', 'WE'): {'color': '#33e0ff', 'legend_name': 'hf$_{we}$', 'legend_order': 0},
+        # ('hf_we_topk_10', 'mean', 'WE'): "hf$^{10}_{we}$",
+        ('hf', 'mean', '07-13'): {'color': 'blue', 'legend_name': 'TracIn, 07-13', 'legend_order': 2},
+        # ('hf', 'mean', '00-05'): {'color': '#2ca02c', 'legend_name': 'hf, 00-05', 'legend_order': 3},
+        # ('hf', 'mean', '06-11'): {'color': '#d62728', 'legend_name': 'hf, 06-11', 'legend_order': 4},
+        ('cos', 'mean', '07-13'): {'color': 'green', 'legend_name': 'Cosine, 07-13', 'legend_order': 5},
+        ('datainf', 'mean', '07-13'): {'color': 'red', 'legend_name': 'DataInf, 07-13', 'legend_order': 6},
+        # ('hf', 'mean', 'CL'): {'color': '#9467bd', 'legend_name': 'hf, CL', 'legend_order': 7},
+        ('rand', '', ''): {'color': 'gray', 'legend_name': 'Random', 'legend_order': 8},        
+    }    
+
+    draw_all_tun2_metric(base_path, selected_methods=mistral_selected_methods, suffix="-sm",
+                            figsize=(8, 2))
     # roberta_layers = ['WE', '00-05', '06-11', '12-17', '18-23', 'CL']
     # llama_layers = ['WE', '00-03', '04-07', '08-11', '12-15', 'CL']
     # mistral_layers = ['WE', '00-07', '08-15', '16-23', '24-31', 'CL']
-    # draw_all_tun2_box_metric(base_path, layers = mistral_layers)
+    # draw_all_tun2_box_metric(base_path, layers = selected_layers, suffix = "-sm",
+    #                         c)
     pass
 
 
