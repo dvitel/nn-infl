@@ -95,7 +95,6 @@ datasets/
 *zip
 # !LoRA-RoBERTa-MRPC.ipynb
 # *ipynb
-grammars_13bf/
 models/
 
 data

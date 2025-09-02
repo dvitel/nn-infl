@@ -20,7 +20,7 @@ task_cwd=/blue/anshumanc.usf/nn-infl/mistral/$task
 for run_id in {0..9}; do
     echo "Calc checkpoint train logits $task $run_id"
     HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
-        /home/dvitel.usf/nn-infl/src/exp.py set-logits --task=$task --m-prefix=m_bl \
+        /home/dvitel.usf/nn-infl/src/exp.py set-logits --task=$task --m-prefix=m_b_ \
         --batch-size=64 --set-name=test --softmaxed
 
     echo "Done calc train logits $task $run_id"

@@ -3,7 +3,7 @@ from functools import partial
 import json
 import os
 from matplotlib.colors import ListedColormap
-from matplotlib.ticker import MultipleLocator
+from matplotlib.ticker import FuncFormatter, MultipleLocator
 import pandas as pd
 import re
 from typing import Optional
@@ -1830,12 +1830,12 @@ def draw_all_tun2_metric(base_path: str, tasks = benchmark, metric_name: str = "
     num_rows = math.ceil(len(benchmark) / num_in_row)
 
     fig, axes = plt.subplots(num_rows, num_in_row, figsize=figsize)
-    plt.subplots_adjust(wspace=0.1, hspace=-0.1)
+    # plt.subplots_adjust(wspace=0.1, hspace=-0.1)
     handles_ = []
 
     for i, task in enumerate(benchmark):
         ax = axes[i // num_in_row, i % num_in_row]
-        ax.set_title(task.upper(), fontsize=10, pad=2)
+        ax.set_title(task.upper(), fontsize=8, pad=0)
 
         method_metrics = tasks_metrics[task]
 
@@ -1875,16 +1875,17 @@ def draw_all_tun2_metric(base_path: str, tasks = benchmark, metric_name: str = "
         ax.set_xticks([2,4,6,8,10])
         if (i // num_in_row) != (num_rows - 1):  # Not in the last row
             ax.set_xticklabels([])
+            ax.xaxis.set_tick_params(pad=0, length=1)
         else:            
             ax.set_xticklabels([2,4,6,8,10])
-            ax.xaxis.set_tick_params(pad=1)
-        ax.yaxis.set_tick_params(pad=1)
+            ax.xaxis.set_tick_params(pad=1, length=1)
+        ax.yaxis.set_tick_params(pad=1, length=1)
 
         if (i // num_in_row) == (num_rows - 1):
-            ax.set_xlabel('Epoch', fontsize=10, labelpad = 2)
+            ax.set_xlabel('Epoch', fontsize=8, labelpad = 0)
 
-        if (i % num_in_row) == 0:
-            ax.set_ylabel('Accuracy \\%', fontsize=10, labelpad = 2)
+        # if (i % num_in_row) == 0:
+        #     ax.set_ylabel('Accuracy \\%', fontsize=10, labelpad = 2)
 
         ax.tick_params(axis='x', labelsize=8)
         ax.tick_params(axis='y', labelsize=8)
@@ -1893,15 +1894,17 @@ def draw_all_tun2_metric(base_path: str, tasks = benchmark, metric_name: str = "
     handles_.sort(key = lambda x: x[2])
     ordered_handles = [h[0] for h in handles_]
     ordered_labels = [h[1] for h in handles_]
-    # plt.xlabel('Epoch', fontsize=20)
+
+    fig.text(0.00, 0.5, f'Accuracy,\\%', ha='left', va='center', rotation='vertical', fontsize=8)
+    # plt.xlabel('Epoch', fontsize=20s)
     # plt.ylabel('Accuracy, \\%', fontsize=20)
-    fig.legend(ordered_handles, ordered_labels, loc='lower center', fontsize=10,
-                ncol=len(ordered_handles),  # Arrange all legend items in one row
-                bbox_to_anchor=(0.5, -0.01)  # Adjust position (centered below the grid)
+    fig.legend(ordered_handles, ordered_labels, loc='lower center', fontsize=8,
+                ncol=len(ordered_handles), borderaxespad = 0,  # Arrange all legend items in one row
+                bbox_to_anchor=(0.5, 0)  # Adjust position (centered below the grid)
         )
     # plt.title(f'{task.upper()} 70\\% filtered finetuning', fontsize=20)
     # plt.title(f'{task.upper()}', fontsize=20)
-    fig.tight_layout(rect=[0, 0.05, 1, 1], h_pad=0.2, w_pad=0.2)
+    fig.tight_layout(rect=[0.015, 0.1, 1, 1], pad = 0, h_pad=0.1, w_pad=0.1)
     outfile = os.path.join(base_path, "plots", f"fig-{metric_name}-{suffix}.pdf")
     fig.savefig(outfile)  
     plt.close(fig)  
@@ -2957,6 +2960,31 @@ network_layers = {
     "qwen": ['WE', '00-06', '07-13', '14-20', '21-27', 'CL'],
 }
 
+network_modules = {
+    "roberta": {"query A": "Query A", "query B": "Query B", 
+                "value A": "Value A", "value B": "Value B"},
+    "llama": {"self_attn q_proj A": "Query A", "self_attn q_proj B": "Query B", 
+                "self_attn v_proj A": "Value A", "self_attn v_proj B": "Value B"},
+    "qwen": {"self_attn q_proj A": "Query A", "self_attn q_proj B": "Query B", 
+                "self_attn v_proj A": "Value A", "self_attn v_proj B": "Value B"},
+    "mistral": {"self_attn q_proj A": "Query A", "self_attn q_proj B": "Query B", 
+                "self_attn v_proj A": "Value A", "self_attn v_proj B": "Value B"},                                
+}
+
+network_best_ndr = {
+    "roberta": "value B",
+    "mistral": "self_attn v_proj B",
+    "qwen": "self_attn v_proj B",
+    "llama": "self_attn v_proj B",
+}
+
+network_layer_count = {
+    "roberta": 24,
+    "llama": 16,
+    "mistral": 32,
+    "qwen": 28
+}
+
 def ndr_test():
     run_id = 2
     base_path = "data/roberta/ndr/test"
@@ -3062,8 +3090,8 @@ def compute_all_corr_matrix(base_path: str, tasks = benchmark,
     for infl_method in infl_method_names:
         for layer in selected_layers:
             if infl_method == 'hf' and layer == 'WE':
-                inf_method_layers.append(('hf_we_', layer))
                 inf_method_layers.append(('hf_we_topk_10', layer))
+                inf_method_layers.append(('hf_we_', layer))
                 inf_method_layers.append((infl_method, layer))
             elif infl_method == 'datainf' and layer == 'WE':
                 continue
@@ -3091,9 +3119,11 @@ def average_correlation_matrices(corr_matrices):
 
 def draw_one_corr_heatmap(scores_corr: pd.DataFrame, task: str, base_path: str, prefix: str):
     import seaborn as sns
-    ticklabels = ["TracIn$^{10}_{we}$" if m == "hf_we_topk_10" else "TracIn$_{we}$" if m == "hf_we_" else l for m, l in scores_corr.index ]
+    ticklabels = ["TI$^{10}_{we}$" if m == "hf_we_topk_10" else "TI$_{we}$" if m == "hf_we_" else l for m, l in scores_corr.index ]
     plt.figure(figsize=(10, 8))
     ax = sns.heatmap(scores_corr, annot=True, fmt=".1f", cmap='coolwarm', cbar=False,
+                        center = 0.5, vmin=0, vmax = 1, 
+                        annot_kws={"color": "black", "fontsize": 12},
                         xticklabels=ticklabels, yticklabels=ticklabels)
     ax.set_xlabel("")
     ax.set_ylabel("")   
@@ -3103,20 +3133,21 @@ def draw_one_corr_heatmap(scores_corr: pd.DataFrame, task: str, base_path: str, 
         ax.hlines(pos, *ax.get_xlim(), colors="black", linewidth=2)  # Horizontal line
         ax.vlines(pos, *ax.get_ylim(), colors="black", linewidth=2)  # Vertical line
 
-    ax.text(-0.5, 3, f"Cosine", ha='center', va='center', rotation='vertical', fontsize=10, color='black')
-    ax.text(-0.5, 10, f"TracIn", ha='center', va='center', rotation='vertical', fontsize=10, color='black')
-    ax.text(-0.5, 16.5, f"DataInf", ha='center', va='center', rotation='vertical', fontsize=10, color='black')
+    ax.text(-0.6, 3, f"Cosine", ha='center', va='center', rotation='vertical', fontsize=12, color='black')
+    ax.text(-0.6, 10, f"TracIn", ha='center', va='center', rotation='vertical', fontsize=12, color='black')
+    ax.text(-0.6, 16.5, f"DataInf", ha='center', va='center', rotation='vertical', fontsize=12, color='black')
 
-    ax.text(3, -0.7, f"Cosine", ha='center', va='center', fontsize=10, color='black')
-    ax.text(10, -0.7, f"TracIn", ha='center', va='center', fontsize=10, color='black')
-    ax.text(16.5, -0.7, f"DataInf", ha='center', va='center', fontsize=10, color='black')
+    ax.text(3, -0.7, f"Cosine", ha='center', va='center', fontsize=12, color='black')
+    ax.text(10, -0.7, f"TracIn", ha='center', va='center', fontsize=12, color='black')
+    ax.text(16.5, -0.7, f"DataInf", ha='center', va='center', fontsize=12, color='black')
 
-    ax.tick_params(axis='x', labelsize=7, rotation=0)  # Set font size for x-axis tick labels
-    ax.tick_params(axis='y', labelsize=7, rotation = 90)  # Set font size for y-axis tick labels
+    ax.tick_params(axis='x', labelsize=10, rotation=0)  # Set font size for x-axis tick labels
+    # ax.set_xticklabels(ax.get_xticks(), verticalalignment='center', fontsize=10)
+    ax.tick_params(axis='y', labelsize=10, rotation = 90)  # Set font size for y-axis tick labels
 
     if task != "avg" and task != "all":
         plt.title(f"{task.upper()}")
-    plt.tight_layout()
+    plt.tight_layout(pad=0, rect=[0.01, 0.01, 1, 1])
     plt.savefig(os.path.join(base_path, "plots", f"{prefix}-corr-{task}.pdf"))
     plt.clf()
 
@@ -3345,6 +3376,331 @@ def draw_perf_diffs(metric_name: str = "best_accuracy_1",
     plt.close(fig)
     pass
 
+def draw_perf_diffs2(metric_name: str = "best_accuracy_1",
+                        out_folder = "data/roberta", datasets = benchmark,
+                        run_ids = [0,1,2,3,4,5,6,7,8,9], layers = [],
+                        res_suffix = "all", pvalue = 0.05): 
+    ''' Like create_tun2_metric_table, but for many agg metrics '''
+    layers.append('')
+
+    all_df = get_all_df(base_path = out_folder, datasets = datasets, 
+                            res_suffix = res_suffix, keep_only=[metric_name])
+    
+    agg_method_keys = ["mean", "rank-c", "vote2-c"]
+    # agg_method_keys.append('')
+
+    all_df = all_df[all_df["agg_method"].isin(agg_method_keys) & all_df["seed"].isin(run_ids) & all_df["module"].isin(layers)]
+    all_df.loc[all_df['infl_method'] == 'hf_we_', ['infl_method', 'module']] = ('hf', 'TI$_{we}$')
+    all_df.loc[all_df['infl_method'] == 'hf_we_topk_10', ['infl_method', 'module']] = ('hf', 'TI$^{10}_{we}$')
+    all_df.set_index(["agg_method", "infl_method", "module", "task", "seed"], inplace=True)
+
+    # metrics_per_ds = all_df.pivot(index=["infl_method", "module", "seed"], columns=["task", "agg_method"], values=metric_name)
+
+
+    # idx = pd.MultiIndex.from_tuples(metrics_per_ds.columns)
+
+    # metrics_per_ds.columns = idx
+
+    base_level_df = all_df.loc['mean'].reset_index().pivot(index=["task", "infl_method", "module"], columns=['seed'], values=metric_name)
+    rank_df = all_df.loc['rank-c'].reset_index().pivot(index=["task", "infl_method", "module"], columns=["seed"], values=metric_name)
+    vote_df = all_df.loc['vote2-c'].reset_index().pivot(index=["task", "infl_method", "module"], columns=["seed"], values=metric_name)
+    diff_rank_df = rank_df.loc[base_level_df.index][base_level_df.columns] - base_level_df
+    diff_vote_df = vote_df.loc[base_level_df.index][base_level_df.columns] - base_level_df
+    diff_rank_df *= 100
+    diff_vote_df *= 100
+    diff_rank_means = diff_rank_df.mean(axis=1)
+    diff_vote_means = diff_vote_df.mean(axis=1)
+    diff_rank_mins = diff_rank_df.groupby(level=[0], axis=0).min()
+    diff_rank_maxs = diff_rank_df.groupby(level=[0], axis=0).max()
+    diff_vote_mins = diff_vote_df.groupby(level=[0], axis=0).min()
+    diff_vote_maxs = diff_vote_df.groupby(level=[0], axis=0).max()
+
+    diff_range = pd.concat([diff_rank_mins, diff_vote_mins, diff_rank_maxs, diff_vote_maxs], axis=1).abs().max(axis=1)
+    diff_mins = pd.concat([diff_rank_mins, diff_vote_mins], axis=1).min(axis=1)
+    diff_maxs = pd.concat([diff_rank_maxs, diff_vote_maxs], axis=1).max(axis=1)
+
+    # diff_rank_stds = diff_rank_df.groupby(level=0, axis=1).std()
+    # diff_vote_stds = diff_vote_df.groupby(level=0, axis=1).std()
+    # column_order = [(i, t) for i in ['hf', 'cos', 'datainf'] for t in datasets]
+
+    # layers = [ *(['TI$_{we}$', 'TI$^{10}_{we}$'] if 'WE' in layers else []), *layers]
+            
+    # diff_rank_avgs0 = diff_rank_avgs.loc[layers][column_order] * 100
+    # diff_vote_avgs0 = diff_vote_avgs.loc[layers][column_order] * 100
+
+    pass 
+    # NOTE: stats tests here
+
+    rank_corr = []
+    vote_corr = []
+    # column_index = set()
+    for idx_key in base_level_df.index:
+        # rank_method_dict = {}
+        # vote_method_dict = {}
+        # infl_method_dataset = set((x[0], x[1]) for x in base_level_df.columns)
+        # for (infl_method, task) in infl_method_dataset:            
+        #     if (infl_method != 'hf' and module.startswith('TI')) or (infl_method == "datainf" and module == "WE"):
+        #         continue
+        #     column_index.add((infl_method, task))
+        #     clms = [(infl_method, task, r) for r in run_ids]
+        base_series = base_level_df.loc[idx_key][run_ids].to_numpy()
+        
+        rank_series = rank_df.loc[idx_key][run_ids].to_numpy()
+        vote_series = vote_df.loc[idx_key][run_ids].to_numpy()
+        wilcoxon_p = sci_stats.wilcoxon(base_series, rank_series).pvalue
+        rank_corr.append(wilcoxon_p)
+        # rank_method_dict[(infl_method, task)] = wilcoxon_p
+        wilcoxon_p = sci_stats.wilcoxon(base_series, vote_series).pvalue
+        vote_corr.append(wilcoxon_p)
+        # vote_method_dict[(infl_method, task)] = wilcoxon_p
+
+    rank_pvalues = pd.DataFrame(rank_corr, index=base_level_df.index, columns=["pvalue"])
+    vote_pvalues = pd.DataFrame(vote_corr, index=base_level_df.index, columns=["pvalue"])
+
+    if len(run_ids) > 5:
+        rank_pvalues_mask = rank_pvalues < pvalue
+        vote_pvalues_mask = vote_pvalues < pvalue
+    else:
+        rank_pvalues_mask = rank_pvalues >= 0 
+        vote_pvalues_mask = vote_pvalues >= 0
+    pass
+    
+    pass 
+
+    from matplotlib import cm
+    # import seaborn as sns
+    plt.ioff()
+    fig, axes = plt.subplots(6, 8, figsize=(12, 5), gridspec_kw={'wspace': 0, 'hspace': 0})
+
+    # methods_dfs = [("Rank", diff_rank_avgs0, rank_pvalues_mask), ("Vote", diff_vote_avgs0, vote_pvalues_mask)]
+
+    # single_color_cmap = ListedColormap(["lightgray"])
+    from itertools import product
+
+    ifl_agg_methods = list(product(
+                               [('Rank', diff_rank_df, diff_rank_means, rank_pvalues_mask), 
+                                ('Vote', diff_vote_df, diff_vote_means, vote_pvalues_mask)],
+                                ['hf', 'datainf', 'cos']))
+    
+    # colors = cm.get_cmap('tab10', 10)
+    colors = plt.cm.Set1.colors 
+    all_layers =  [ *(['TI$_{we}$', 'TI$^{10}_{we}$'] if 'WE' in layers else []), *layers]
+    layer_colors = {l:colors[i] for i, l in enumerate(all_layers)}
+
+    yd1 = 0.06
+    yd2 = 0.96
+
+    yc = (yd1 + yd2) / 2
+    yc1 = (yc + yd1) / 2
+    yc2 = (yc + yd2) / 2
+    d = (yc - yc1) / 3 * 2
+
+    handles = []
+    for col_id, task in enumerate(datasets): # columns 
+        for row_id, ((agg_name, method_df, method_means, method_mask), infl_method) in enumerate(ifl_agg_methods):
+            ax = axes[row_id, col_id]
+            ax_df = method_df.loc[(task, infl_method)]
+            # ax_points = ax_df.to_numpy() #2d: module --> points
+            # draw stripe
+            stripe_height = 1
+            ax.set_ylim(-stripe_height / 2, stripe_height / 2)
+            # r = diff_range.loc[task]
+            r_min = diff_mins.loc[task]
+            r_max = diff_maxs.loc[task]
+            ax.set_xlim(r_min, r_max)
+            # x_min, x_max = ax.get_xlim()
+            # stripe_width = x_max - x_min
+
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.spines['left'].set_visible(False)
+            ax.spines['bottom'].set_visible(False)            
+
+            # Draw the x-axis at y=0
+            # ax.hlines(y=0, xmin=-r, xmax=r, color='gray', linewidth=0.5, linestyle='-')
+            
+            ax.vlines(x=0, ymin=-0.5, ymax=0.5, color='black', linewidth=0.5, linestyle='--', zorder=0)
+            ax.vlines(x=r_min, ymin=-0.5, ymax=0.5, color='black', linewidth=0.3, linestyle=':', zorder=0)
+            ax.vlines(x=r_max, ymin=-0.5, ymax=0.5, color='black', linewidth=0.3, linestyle=':', zorder=0)
+
+            # ax.vlines(x=-r, ymin=-0.2, ymax=0.2, color='black', linewidth=0.5, linestyle='--')
+            # ax.vlines(x=r, ymin=-0.2, ymax=0.2, color='black', linewidth=0.5, linestyle='--')
+
+            # if row_id == 0 or row_id == len(ifl_agg_methods) - 1:
+            #     ax.text(-r, 0, f"{-r:.0f}", ha='left', va='center', fontsize=8, color='black', rotation="vertical")
+            #     ax.text(r, 0, f"{r:.0f}", ha='right', va='center', fontsize=8, color='black', rotation="vertical")
+
+            # ax.text(12, 2-0.5, f"Cosine", ha='center', va='center', fontsize=16, color='black')
+            # ax.text(20, 3-0.5, f"DataInf", ha='center', va='center', fontsize=16, color='black')
+
+
+
+            present_layers = [l for l in all_layers if l in ax_df.index]
+
+            for i, layer in enumerate(present_layers):
+                points = ax_df.loc[layer].to_numpy()
+                is_sign = method_mask.loc[(task, infl_method, layer)].bool()
+                mean = method_means.loc[(task, infl_method, layer)]
+                y_pos = (0.1 / len(present_layers)) + (i - len(present_layers) / 2) * ((stripe_height - 0.2) / len(present_layers))
+                y_poss = np.full_like(points, y_pos)
+                # y_positions = np.random.uniform(-0.1, 0.1, size=len(points))
+                alpha = (1 if is_sign and (abs(mean) >= 1) else 0.2)
+                ax.plot([np.min(points), np.max(points)], [y_pos, y_pos], color='black', linewidth=0.3, alpha=alpha, zorder=0)
+                points_ch = ax.scatter(points, y_poss, color=layer_colors[layer], 
+                                       s=20, 
+                                       edgecolors=('black' if is_sign and (abs(mean) >= 1) else 'none'), 
+                                       alpha=alpha,
+                                       linewidths=0.1
+                                    ) #, clip_on=False)
+                if row_id == 0 and col_id == 0:
+                    handles.append((points_ch, layer))
+
+
+            # Remove y-axis ticks and labels
+            ax.tick_params(axis='both', which='both', length=0) 
+            ax.set_xticks([])
+            ax.set_xticklabels([])
+            ax.set_yticks([])
+            ax.set_yticklabels([])
+
+            # if row_id == 0: # add title to column
+            #     ax.set_title(task.upper(), fontsize=16, pad=10)
+
+            # Add x-axis labels
+            # ax.set_xlabel('Spread of Points', fontsize=10)
+            # ax.set_xticks(np.linspace(-stripe_width / 2, stripe_width / 2, 5))
+            # ax.tick_params(axis='x', labelsize=8)
+
+            # Add a legend
+            # ax.legend(fontsize=8, loc='upper right')
+            pass 
+            # break
+
+    fig.add_artist(plt.Line2D([0, 1], [yc, yc], color='black', linewidth=0.5))
+
+    fig.text(0.00, yc1, f'Vote', ha='left', va='center', rotation='vertical', fontsize=12)
+    fig.text(0.01, yc1 - d, f'Cosine', ha='left', va='center', rotation='vertical', fontsize=10)
+    fig.text(0.01, yc1, f'DataInf', ha='left', va='center', rotation='vertical', fontsize=10)
+    fig.text(0.01, yc1 + d, f'TracIn', ha='left', va='center', rotation='vertical', fontsize=10)
+    fig.text(0.00, yc2, f'Rank', ha='left', va='center', rotation='vertical', fontsize=12)
+    fig.text(0.01, yc2 - d, f'Cosine', ha='left', va='center', rotation='vertical', fontsize=10)
+    fig.text(0.01, yc2, f'DataInf', ha='left', va='center', rotation='vertical', fontsize=10)
+    fig.text(0.01, yc2 + d, f'TracIn', ha='left', va='center', rotation='vertical', fontsize=10)
+
+    xd1 = 0.02
+
+    for col_id, task in enumerate(datasets): # columns 
+        r_min = diff_mins.loc[task]
+        r_max = diff_maxs.loc[task]
+
+        # ax = axes[0, col_id]
+        # # pos = ax.get_position() 
+        # # x0, y0, x1, y1 = pos.extents                 
+        # axes_coord = ax.transData.transform((r_min, 0))
+        # fig_x_min, _ = fig.transFigure.inverted().transform(axes_coord) #ax.transAxes.transform(axes_coord))
+
+        fig_x_min = xd1 + (1 - xd1) * col_id / len(datasets)
+
+        fig.text(fig_x_min + 0.002, yc, f"{r_min:.0f}", ha='left', va='top', fontsize=10, color='black')
+        # axes_coord = ax.transData.transform((r_max, 0))
+        # fig_x_max, _ = fig.transFigure.inverted().transform(axes_coord) #ax.transAxes.transform(axes_coord))
+        fig_x_max = xd1 + (1 - xd1) * (col_id + 1) / len(datasets)
+        fig.text(fig_x_max - 0.002, yc, f"{r_max:.0f}", ha='right', va='bottom', fontsize=10, color='black')
+        pass
+
+    # for method_i, (method_name, method_df, method_mask) in enumerate(methods_dfs):
+
+    #     ax = axes[method_i]
+
+    #     mask = method_df.isna()
+
+    #     sign_mask0 = method_mask.loc[method_df.index][method_df.columns] & (method_df.abs() >= 1)
+    #     sign_mask = mask | (~sign_mask0)
+    #     insign_mask_base = mask | sign_mask0
+    #     insign_mask0 = (~method_mask.loc[method_df.index][method_df.columns]) & (method_df.abs() >= 1)
+    #     insign_mask = mask | (~insign_mask0)
+
+    #     yticklabels = ['All' if l == '' else l for l in layers]
+    #     xticklabels = [d.upper() for d in datasets] * 3
+    #     # ticklabels = ["TracIn$^{10}_{we}$" if m == "hf_we_topk_10" else "TracIn$_{we}$" if m == "hf_we_" else l for m, l in scores_corr.index ]
+    #     ax0 = sns.heatmap(method_df, annot=True, fmt=".1f", cmap='coolwarm', cbar=False, 
+    #                         mask=sign_mask, annot_kws={"color": "black", "fontsize": 10},
+    #                         center = 0, vmin = -10, vmax = 10,
+    #                         xticklabels=xticklabels, yticklabels=yticklabels, ax = ax)
+    #     sns.heatmap(method_df, annot=False, cmap=single_color_cmap, cbar=False, 
+    #                         mask=insign_mask_base, annot_kws={"color": "black", "fontsize": 7},
+    #                         center = 0, vmin = -10, vmax = 10,
+    #                         xticklabels=xticklabels, yticklabels=yticklabels, ax = ax)   
+    #     sns.heatmap(method_df, annot=True, cmap=single_color_cmap, cbar=False, 
+    #                         mask=insign_mask, annot_kws={"color": "black", "fontsize": 7},
+    #                         center = 0, vmin = -10, vmax = 10,
+    #                         xticklabels=xticklabels, yticklabels=yticklabels, ax = ax)               
+    #     ax0.set_title(method_name, fontsize=20, pad=10)
+    #     ax0.xaxis.tick_top()
+    #     ax0.set_xlabel("")
+    #     ax0.set_ylabel("")   
+    #     ax0.invert_yaxis()  
+    #     # ax1.invert_yaxis()
+    #     ax0.spines['bottom'].set_linewidth(0)
+    #     ax0.spines['top'].set_linewidth(0)        
+    #     # ax1.spines['bottom'].set_linewidth(0)
+    #     # ax1.spines['top'].set_linewidth(0)
+    #     ax0.tick_params(axis = "x", length = 0, labelsize=6, rotation=0, pad=0)
+    #     ax0.tick_params(axis = "y", length = 0, labelsize=7, rotation=90, pad=0)
+    #     if method_i > 0:
+    #         ax0.tick_params(axis='y', left=False, labelleft=False)        
+    #     # ax.invert_yaxis()  
+    #     boundary_positions = [0, 8, 16]
+    #     b_ys = [ (0, 9), (0, 9), (2, 9) ]
+    #     for line_id, (b_y, pos) in enumerate(zip(b_ys, boundary_positions)):
+    #         if line_id == 0 and method_i == 0:
+    #             continue
+    #         # ax.hlines(pos, *b_y, colors="black", linewidth=1)  # Horizontal line
+    #         ax0.vlines(pos, *b_y, colors="black", linewidth=1)  # Vertical line
+
+    #     # ax.text(-0.5, 3, f"Cosine", ha='center', va='center', rotation='vertical', fontsize=10, color='black')
+    #     # ax.text(-0.5, 10, f"TracIn", ha='cefnter', va='center', rotation='vertical', fontsize=10, color='black')
+    #     # ax.text(-0.5, 16.5, f"DataInf", ha='center', va='center', rotation='vertical', fontsize=10, color='black')
+
+    #     ax0.text(4, -0.5, f"TracIn", ha='center', va='center', fontsize=16, color='black')
+    #     ax0.text(12, 2-0.5, f"Cosine", ha='center', va='center', fontsize=16, color='black')
+    #     ax0.text(20, 3-0.5, f"DataInf", ha='center', va='center', fontsize=16, color='black')
+
+    #     # ax.tick_params(axis='x', labelsize=7, rotation=0)  # Set font size for x-axis tick labels
+    #     # ax.tick_params(axis='y', labelsize=7, rotation = 90)  # Set font size for y-axis tick labels
+
+    #     # if task != "avg" and task != "all":
+    #     #     plt.title(f"{task.upper()}")
+    
+    # xd1 = 0
+
+    for col_id, title in enumerate(datasets):
+        x_pos = xd1 + (1 - xd1) * (col_id + 0.5) / len(datasets)  # Calculate the x position for each title
+        fig.text(x_pos, 1, title.upper(), ha='center', va='top', fontsize=12)
+
+    # plt.xlabel('Epoch', fontsize=20s)
+    # plt.ylabel('Accuracy, \\%', fontsize=20)
+    # ordered_handles = [h[0] for h in handles]
+
+    from matplotlib.patches import Patch
+
+    ordered_handles = [Patch(facecolor=layer_colors[layer], label=layer) for layer in all_layers]
+    all_layer_names =  [ *(['TracIn$_{we}$', 'TracIn$^{10}_{we}$'] if 'WE' in layers else []), *layers]
+    ordered_labels = ["All" if n == "" else n for n in all_layer_names]    
+    fig.legend(ordered_handles, ordered_labels, loc='lower center', fontsize=10,
+                ncol=len(ordered_handles), borderaxespad = 0,  # Arrange all legend items in one row
+                bbox_to_anchor=(0.5, 0)  # Adjust position (centered below the grid)
+        )
+    # plt.title(f'{task.upper()} 70\\% filtered finetuning', fontsize=20)
+    # plt.title(f'{task.upper()}', fontsize=20)
+    # fig.tight_layout(rect=[0.015, 0.1, 1, 1], pad = 0, h_pad=0.1, w_pad=0.1)
+
+
+    fig.tight_layout(rect=[xd1, yd1, 1, yd2], h_pad=0, w_pad=0, pad=0)
+    fig.savefig(os.path.join(base_path, "plots", f"rank-vote-diffs2.pdf"))
+    plt.close(fig)
+    pass
+
 def create_cancel_table(base_path:str, m_prefix: str = "m_bl", levels=[1], layers = ['WE', 'CL']):
     import math
     df = pd.read_pickle(os.path.join(base_path, "cancel", f"cancellation_{m_prefix}.pkl"))
@@ -3502,7 +3858,7 @@ def setup_interactions(base_path: str, tasks=benchmark,
                     selected_layers = None,
                     use_ndr = False, dom_threshold = 0.75,
                     ndr_prefix = "ndr_bl", res_suffix = "all",
-                    metric_thershold = 0.00, rank_start = 0,
+                    metric_thershold = 0.00, rank_start = 0, with_mean = False,
                     suffix = ""):
     ''' From all run scores, computes the interaction matrix between setups  
         and their pareto fronts 
@@ -3513,6 +3869,13 @@ def setup_interactions(base_path: str, tasks=benchmark,
                 selected_layers=selected_layers)
 
     score_df = df.pivot(index=["infl", "agg", "layer", "module"], columns=["task", "seed"], values=metric_name)
+
+    if with_mean:
+        mean_df = score_df.mean(axis=1)
+        std_df = score_df.std(axis=1)
+    else:
+        mean_df = None
+        std_df = None
 
     run_index = score_df.columns
 
@@ -3608,8 +3971,7 @@ def setup_interactions(base_path: str, tasks=benchmark,
         new_row.append(num_domed)
         # for x in row:
         #     new_row.append(f"{x:.1f}".lstrip('0'))
-        rows.append((layer_rank, win_rate, wstd, num_wins - num_losses, new_row))
-        data_for_df.append({
+        new_row_res = {
             "rank": layer_rank,
             "win_rate": win_rate,
             "wstd": wstd,
@@ -3617,13 +3979,21 @@ def setup_interactions(base_path: str, tasks=benchmark,
             "num_losses": num_losses,
             "num_doms": num_doms,
             "num_domed": num_domed
-        })
+        }
+        if with_mean:
+            new_row_res["mean"] = mean_df[index]
+            new_row_res["std"] = std_df[index]
+            new_row.append(f"{mean_df[index]:.2f} \\pm \\footnotesize {std_df[index]:.2f}")
+        rows.append((layer_rank, win_rate, wstd, num_wins - num_losses, new_row))
+        data_for_df.append(new_row_res)
     rows.sort(key=lambda x: (x[0], -x[1], x[2], -x[3]))
     rows = [x[4] for x in rows]
     
     out_path = os.path.join(base_path, 'tables', f"intranks-{metric_name}{suffix}.tex")
 
     headers = ["Infl", "Agg", "Layer", "Module", "Rank", "Win rate", "Wins", "Loss", "Doms", "Domed"]
+    if with_mean:
+        headers.append("Value")
     if all_are_all:
         headers.remove("Module")
     with open(out_path, "w") as f:
@@ -3632,6 +4002,244 @@ def setup_interactions(base_path: str, tasks=benchmark,
     data_df = pd.DataFrame(data_for_df, index=int_df.index)
     out_path = os.path.join(base_path, 'metrics', f"intranks-{metric_name}{suffix}.pcl")
     data_df.to_pickle(out_path)
+    pass
+
+def get_confidence_interval(data_df: pd.DataFrame, confidence_level=0.95):
+    data_np_t = data_df.to_numpy().T
+    data_mean = data_np_t.mean(axis=0)
+    degrees_freedom = data_np_t.shape[0] - 1 # num of measures - 1
+    sample_standard_error = stats.sem(data_np_t, axis=0)
+    confidence_interval = stats.t.interval(confidence_level, degrees_freedom, data_mean, sample_standard_error)
+    min_v = confidence_interval[0]
+    max_v = confidence_interval[1]
+    res_df = pd.DataFrame(data={"min_v": min_v, "mean": data_mean, "max_v": max_v}, index=data_df.index)
+    return res_df
+
+
+def layer_ndr_metric_graphs(base_path: str, tasks=benchmark, 
+                    metric_name = 30, figsize = (8, 2),
+                    infl_method_names = ['datainf', 'hf', 'cos'],
+                    module_names = {"self_attn q_proj A": "Query A", "self_attn q_proj B": "Query B", 
+                                    "self_attn v_proj A": "Value A", "self_attn v_proj B": "Value B"},
+                    # module_names = {"self_attn q_proj A": "query A"},
+                    module_layers = list(range(32)),
+                    cl_modules = {"all": "CL"}, # makes sense for Roberta only
+                    ndr_prefix = "ndr_bl", suffix = "",
+                    max_of = "self_attn v_proj B",
+                    y_title = "Layer-wise NDR, \\%"):
+    ''' From all run scores, computes the interaction matrix between setups  
+        and their pareto fronts 
+    '''
+    orig_infl_names = list(infl_method_names)
+
+    cache_path = os.path.join(base_path, f"layer_ndr{suffix}.pcl")
+    if os.path.exists(cache_path):
+        score_df = pd.read_pickle(cache_path) 
+    else:
+        df = load_df(base_path, tasks, use_ndr = True, ndr_prefix = ndr_prefix, metric_name=metric_name, 
+                    agg_method_names=['mean'], infl_method_names=infl_method_names)
+    
+        score_df = df.pivot(index=["infl", "agg", "layer", "module"], columns=["task", "seed"], values=metric_name)
+        score_df.to_pickle(cache_path)
+
+    score_df *= 100.0
+
+    infl_method_names = orig_infl_names
+    infl_method_names.remove("hf_we_")
+    infl_method_names.remove("hf_we_topk_10")
+
+
+    # mean_df = score_df.mean(axis=1)
+    conf_int_df = get_confidence_interval(score_df)
+    # std_df = score_df.std(axis=1)
+
+    very_min = conf_int_df.min(axis=1).min()
+    very_max = conf_int_df.max(axis=1).max()
+
+    module_name_list = list(module_names.keys())
+
+
+    ndr_per_infl_values = []
+    infl_method_mapping = {"datainf": "DataInf", "hf_we_": "TracIn$_{we}$", "hf_we_topk_10": "TracIn$^{10}_{we}$", "hf": "TracIn", "cos": "Cosine"}
+    for infl_method in infl_method_names:
+        infl_name = infl_method_mapping[infl_method]
+        infl_chart = {"id": infl_method, "name": infl_name}
+        x_markers = infl_chart.setdefault("x_markers", [])
+        end_x_marks = []
+        # x_min_values = []
+        # x_mean_values = []
+        # x_max_values = []
+        # x_markers = [] 
+        # common_start = []
+        # common_end = []
+        we_value = None
+        if infl_method == "hf": 
+            start_y_min_values = infl_chart.setdefault("start_y_min_values", [])
+            start_y_mean_values = infl_chart.setdefault("start_y_mean_values", [])
+            start_y_max_values = infl_chart.setdefault("start_y_max_values", [])
+            # selecting also hf_we_ and hf_we_topk_10
+            we_value = conf_int_df.loc[("hf_we_topk_10", "mean", "WE", "all")]
+            start_y_min_values.append(we_value["min_v"])
+            start_y_mean_values.append(we_value["mean"])
+            start_y_max_values.append(we_value["max_v"])
+            x_markers.append("TI$^{10}_{we}$")
+
+            we_value = conf_int_df.loc[("hf_we_", "mean", "WE", "all")]
+            start_y_min_values.append(we_value["min_v"])
+            start_y_mean_values.append(we_value["mean"])
+            start_y_max_values.append(we_value["max_v"])
+            x_markers.append("TI$_{we}$")        
+
+            we_value = conf_int_df.loc[("hf", "mean", "WE", "all")]
+            start_y_min_values.append(we_value["min_v"])
+            start_y_mean_values.append(we_value["mean"])
+            start_y_max_values.append(we_value["max_v"])
+            x_markers.append("WE")
+        elif infl_method == "cos":
+            start_y_min_values = infl_chart.setdefault("start_y_min_values", [])
+            start_y_mean_values = infl_chart.setdefault("start_y_mean_values", [])
+            start_y_max_values = infl_chart.setdefault("start_y_max_values", [])
+            we_value = conf_int_df.loc[("cos", "mean", "WE", "all")]
+            start_y_min_values.append(we_value["min_v"])
+            start_y_mean_values.append(we_value["mean"])
+            start_y_max_values.append(we_value["max_v"])
+            x_markers.append("WE")
+        prev_we_value = we_value
+        next_we_value = None
+        for cl_module in cl_modules.keys():
+            end_y_min_values = infl_chart.setdefault("end_y_min_values", [])
+            end_y_mean_values = infl_chart.setdefault("end_y_mean_values", [])
+            end_y_max_values = infl_chart.setdefault("end_y_max_values", [])
+            we_value = conf_int_df.loc[(infl_method, "mean", "CL", cl_module)]
+            end_y_min_values.append(we_value["min_v"])
+            end_y_mean_values.append(we_value["mean"])
+            end_y_max_values.append(we_value["max_v"])
+            end_x_marks.append(cl_modules[cl_module])
+            if next_we_value is None:
+                next_we_value = we_value
+        if prev_we_value is not None:
+            for module_name in module_name_list:
+                y_min_values = infl_chart.setdefault(f"{module_name}:min", [])
+                y_mean_values = infl_chart.setdefault(f"{module_name}:mean", [])
+                y_max_values = infl_chart.setdefault(f"{module_name}:max", [])
+                y_min_values.append(prev_we_value["min_v"])
+                y_mean_values.append(prev_we_value["mean"])
+                y_max_values.append(prev_we_value["max_v"])                
+        for module_layer in module_layers:
+            layer_name = str(module_layer)
+            x_markers.append(module_layer + 1)
+            for module_name in module_name_list:
+                y_min_values = infl_chart.setdefault(f"{module_name}:min", [])
+                y_mean_values = infl_chart.setdefault(f"{module_name}:mean", [])
+                y_max_values = infl_chart.setdefault(f"{module_name}:max", [])
+                we_value = conf_int_df.loc[(infl_method, "mean", layer_name, module_name)]
+                y_min_values.append(we_value["min_v"])
+                y_mean_values.append(we_value["mean"])
+                y_max_values.append(we_value["max_v"])
+        if next_we_value is not None:
+            for module_name in module_name_list:
+                y_min_values = infl_chart.setdefault(f"{module_name}:min", [])
+                y_mean_values = infl_chart.setdefault(f"{module_name}:mean", [])
+                y_max_values = infl_chart.setdefault(f"{module_name}:max", [])
+                y_min_values.append(next_we_value["min_v"])
+                y_mean_values.append(next_we_value["mean"])
+                y_max_values.append(next_we_value["max_v"]) 
+        x_markers.extend(end_x_marks)
+        ndr_per_infl_values.append(infl_chart)
+
+    plt.ioff()
+    fig, axes = plt.subplots(1, len(ndr_per_infl_values), figsize=figsize)
+    ordered_handles = []
+    ordered_labels = []
+    for chart_id, chart_data in enumerate(ndr_per_infl_values):
+        ax =  axes[chart_id]
+        start_id = 1
+        if "start_y_mean_values" in chart_data:
+            start_means = chart_data["start_y_mean_values"]
+            start_id += (len(start_means) - 1)
+        if start_id > 1:
+            adjustment = [1, 3.5, 6]
+            start_id = adjustment[-1]
+        else:
+            adjustment = [1]
+        x_max_pos = None
+        for module_name in module_name_list:
+            y_min_values = chart_data[f"{module_name}:min"]
+            y_mean_values = chart_data[f"{module_name}:mean"]
+            y_max_values = chart_data[f"{module_name}:max"]
+            local_x = np.arange(len(y_mean_values)) + start_id
+            if max_of == module_name:
+                max_pos = np.argmax(y_mean_values)
+                x_max_pos = local_x[max_pos]
+            ln = ax.plot(local_x, y_mean_values, label=module_names[module_name], linewidth=1)
+            if chart_id == 0:
+                ordered_handles.append(ln[0])
+                ordered_labels.append(module_names[module_name])
+            ax.fill_between(local_x, y_min_values, y_max_values, color=ln[0].get_color(), alpha=0.2)
+            # start_id += len(y_mean_values)
+        start_id += (len(y_mean_values) - 1)
+        if "end_y_mean_values" in chart_data:
+            end_means = chart_data["end_y_mean_values"]
+            local_x = np.arange(len(end_means)) + start_id
+            ln = ax.plot(local_x, end_means, color="black", linewidth=1) 
+            ax.fill_between(local_x, chart_data["end_y_min_values"], chart_data["end_y_max_values"], color=ln[0].get_color(), alpha=0.2)           
+            # start_id += len(end_means)
+        start_id = 1
+        if "start_y_mean_values" in chart_data:
+            start_means = chart_data["start_y_mean_values"]
+            local_x = np.arange(len(start_means)) + start_id
+            ln = ax.plot(adjustment, start_means, color="black", linewidth=1) #linestyle="--", linewidth=1.5)
+            if len(adjustment) > 1 and chart_id == 1:
+                ordered_handles.append(ln[0])
+                ordered_labels.append("WE methods")
+            ax.fill_between(adjustment, chart_data["start_y_min_values"], chart_data["start_y_max_values"], color=ln[0].get_color(), alpha=0.2)
+            # start_id += len(start_means)            
+        x_markers = chart_data["x_markers"]
+        tick_poss = adjustment + list(np.arange(len(x_markers) - len(adjustment)) + 1 + adjustment[-1])
+        ax.set_xlim(0.5, (adjustment[-1] + len(x_markers) - len(adjustment))+0.5)
+        filtered_labels = []
+        filtered_ticks = []
+        for mid, m in enumerate(x_markers):
+            try:
+                num = int(m)
+                if num % 3 == 0:
+                    filtered_ticks.append(tick_poss[mid])
+                    filtered_labels.append(str(num))
+                else:
+                    if len(filtered_labels) == 0:
+                        filtered_ticks.append(tick_poss[mid])
+                        filtered_labels.append(str(num))
+                    # else:
+                    #     filtered_labels.append("")
+            except ValueError:
+                filtered_ticks.append(tick_poss[mid])
+                filtered_labels.append(m)
+        ax.set_xticks(filtered_ticks)
+        ax.set_xticklabels(filtered_labels, fontsize=7, verticalalignment='center')
+        ax.tick_params(axis='x', length=1)
+        ax.tick_params(axis='y', pad=0, length=1)
+        if chart_id == 0:
+            ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{int(value)}"))
+            ax.set_ylabel(y_title, fontsize=10, labelpad=0)
+            ax.set_yticks([40,50,60,70,80,90])
+        else:
+            ax.set_yticks([])
+        ax.set_yticklabels(ax.get_yticks(), fontsize=7) 
+        ax.set_ylim(very_min, very_max)
+        ax.set_xlabel("Layers", fontsize=8, labelpad=0)
+        ax.set_title(chart_data["name"], fontsize=10, pad=0)
+        for yhline in [40,50,60,70,80,90]:
+            ax.axhline(y=yhline, color="gray", linewidth=0.5, linestyle="--")
+        if x_max_pos is not None:
+            ax.axvline(x=x_max_pos, color="gray", linewidth=0.5, linestyle="--")
+
+    fig.legend(ordered_handles, ordered_labels, loc='lower center', fontsize=8,
+                ncol=len(ordered_handles), borderaxespad = 0,  # Arrange all legend items in one row
+                bbox_to_anchor=(0.5, 0)  # Adjust position (centered below the grid)
+        )        
+    fig.tight_layout(w_pad=0, h_pad=0, pad=0, rect=[0, 0.13, 1, 1])
+    fig.savefig(os.path.join(base_path, "plots", f"layers-ndr-{suffix}.pdf"))
+    plt.close(fig)
     pass
 
 
@@ -3651,7 +4259,7 @@ if __name__ == "__main__":
     # cnts = {s:c for s,c in counts.items() if len(c) < 10}
 
 
-    network = "mistral"
+    network = "llama"
     group_file = "./groups.json"
     base_path = f"data/{network}"
     selected_layers = network_layers[network]
@@ -3663,13 +4271,19 @@ if __name__ == "__main__":
     #                     agg_method_names = agg_method_names, dom_threshold = 0.75,
     #                     infl_method_names=infl_method_names)
 
-    infl_method_names = ["hf_we_", "hf_we_topk_10",  "hf", "cos", "datainf", "denoise", "rand"]
+    infl_method_names = ["datainf", "hf_we_", "hf_we_topk_10",  "hf", "cos"] #, "denoise", "rand"]
     agg_method_names = ["mean", '']
     res_suffix = "bl"
     # setup_interactions(base_path, use_ndr=False, metric_name="best_accuracy_1",
     #                     agg_method_names = agg_method_names, dom_threshold = 0.5,
-    #                     infl_method_names=infl_method_names, #suffix="-mean",
+    #                     infl_method_names=infl_method_names, suffix="-mean",
     #                     res_suffix=res_suffix)    
+    selected_network_modules = network_modules[network]
+    # layer_ndr_metric_graphs(base_path, metric_name=30,
+    #                     infl_method_names=infl_method_names, suffix="",
+    #                     module_layers = list(range(network_layer_count[network])),
+    #                     module_names = selected_network_modules,
+    #                     max_of = network_best_ndr[network],figsize=(8, 1.5))
     pass 
 
     # for i, columns in enumerate([["datainf"], ["hf_we_", "hf_we_topk_10",  "hf"], ["cos"]]):
@@ -3693,8 +4307,9 @@ if __name__ == "__main__":
     # compute_corr_matrix(base_path, selected_layers=selected_layers, noise_only = noise_only)
     #                     # tasks = ["qnli", "mrpc", "sst2", "qqp", "cola", "stsb"])
     # compute_all_corr_matrix(base_path, selected_layers=selected_layers, noise_only = noise_only)
-    #                         # tasks = ["qnli", "mrpc", "sst2", "qqp", "cola", "stsb"])
+                            # tasks = ["qnli", "mrpc", "sst2", "qqp", "cola", "stsb"])
     # draw_corr_heatmap(base_path, noise_only = noise_only) #tasks = ["qnli", "mrpc", "sst2", "qqp", "cola", "stsb"])
+    # draw_all_corr_heatmap(base_path, noise_only = noise_only)
     base_paths = [
         ('Roberta-Large', 'data/roberta'),
         ('Llama-3.2 1B', 'data/llama'),
@@ -3716,8 +4331,9 @@ if __name__ == "__main__":
 
     # run_spearman_total(out_folder=base_path, layers = selected_layers) #, run_ids = [0,1,2,3,4])
     # create_tun2_agg_metrics_table(out_folder=base_path, res_suffix = res_suffix)
-    # draw_perf_diffs(out_folder = base_path, layers = selected_layers,
-    #                 pvalue = 0.1) # run_ids = [0,1,2,3,4])
+
+    draw_perf_diffs2(out_folder = base_path, layers = selected_layers,
+                    pvalue = 0.1) # run_ids = [0,1,2,3,4])
     pass
 
     # create_tun2_agg_diffs_table(metric_name="best_accuracy_1", ds_ranks=False, mul = 100, 
@@ -3772,8 +4388,8 @@ if __name__ == "__main__":
     # process_ndr_table(base_path, tasks=benchmark, with_row_id=False, custom_suffix = "-hf",
     #                     agg_method_names=['vote2-c'],
     #                     infl_method_names=['hf'])
-    # draw_noise_distr(base_path, tasks=['qnli'], layers = selected_layers, suffix="qnli-n", agg_name="mean",
-    #                         figsize = (8,2), no_left_no_bottom = True)
+    draw_noise_distr(base_path, tasks=['qnli'], layers = selected_layers, suffix="qnli-n-sm", agg_name="mean",
+                            figsize = (8,1.5), no_left_no_bottom = True)
     # pass
     # draw_noise_distr(base_path, tasks=benchmark, layers = selected_layers, suffix="all", agg_name="mean",
     #                     figsize=(8, 10))
