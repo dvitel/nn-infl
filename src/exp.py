@@ -4,12 +4,11 @@ from functools import partial
 import json
 import os
 import re
-from time import time
 
 import datasets
 from tqdm import tqdm
 
-from postprocess import compute_ndr_metrics_table, cset_matrix_score, dir_matrix_score, mean_matrix_score, min_matrix_score, rank_matrix_score, vote2_matrix_score, vote_matrix_score
+from postprocess import compute_ndr_metrics_table, cset_matrix_score, mean_matrix_score, min_matrix_score, rank_matrix_score, vote2_matrix_score, vote_matrix_score
 os.environ['HF_HOME'] = os.path.join(os.getcwd(), '.cache')
 import pickle
 import random
@@ -17,7 +16,7 @@ import random
 import argh
 import numpy as np
 from lora_model import build_LORA_model, save_checkpoint, train_LORA_model, load_pretrained_LORA_model, compute_grads
-from influence import IFEngine, compute_hessian_free_influences, compute_datainf_influences, compute_infl_from_model, compute_lissa_influences, compute_accurate_influences, datainf_fn, lissa_fn
+from influence import compute_hessian_free_influences, compute_datainf_influences, compute_lissa_influences, compute_accurate_influences
 import torch
 from transformers import AutoTokenizer, DataCollatorWithPadding
 from datasets import load_dataset, load_from_disk, Dataset, ClassLabel

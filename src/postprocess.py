@@ -33,7 +33,7 @@ matplotlib.rcParams['font.family'] = ['Times']
 
 benchmark = ["qnli", "mrpc", "sst2", "qqp", "cola", "mnli", "rte", "stsb"]
 
-from cifar import DatasetSplits
+# from cifar import DatasetSplits
 
 def draw_mislabel_detection_rate(task="mrpc", res_folder = "./data/", datasets_folder = "./data/",  
                                     module_pattern='', out = "./data/mdr/qnli.png", title = "All modules"):
@@ -3803,6 +3803,61 @@ def run_spearman_total(out_folder = "data/roberta", datasets = benchmark,
 
     pass 
 
+def run_spearman_total2(out_folder = "data/roberta", datasets = benchmark,
+                        m_prefix = "m_bl", layers = ['WE', 'CL'], run_ids = [0,1,2,3,4,5,6,7,8,9],
+                        suffix=""):
+
+    c_df = pd.read_pickle(os.path.join(out_folder, "cancel", f"cancellation_{m_prefix}.pkl"))
+
+    all_df = get_all_df(base_path = out_folder, datasets = datasets, res_suffix="all",
+                        keep_only=["best_accuracy_1", "noise_30", "auc_ndr"])
+
+    all_df.set_index(["infl_method", "agg_method", "task", "module", "seed"], inplace=True)
+
+    # metrics_per_ds = all_df.pivot(index=["infl_method", "agg_method", "module"], columns=["task", "seed"], values=[metric_name, ndr_metric_name])
+    # # metrics_per_ds = metrics_per_ds.dropna(axis=1, how='any')
+    # metric_columns = {(ds, seed) for _, ds, seed in metrics_per_ds.columns[metrics_per_ds.columns.get_level_values(0) == metric_name]}
+    # ndr_columns = {(ds, seed) for _, ds, seed in metrics_per_ds.columns[metrics_per_ds.columns.get_level_values(0) == ndr_metric_name]}
+    # common_columns = set.intersection(metric_columns, ndr_columns)
+
+    # infl_methods = ["hf"] # ["datainf", "hf_we_", "hf_we_topk_10", "hf", "cos"]
+    # # infl_mapping = ["DataInf", "TracIn$_{we}$", "TracIn$^{10}_{we}$", "TracIn", "Cosine"]
+
+    can_per_infl_method = defaultdict(list)
+    mcan_per_infl_method = defaultdict(list)
+    acc_per_infl_method = defaultdict(list)
+    for task in datasets:
+        for layer in layers:
+            for run_id in run_ids: 
+                cancellation = c_df.loc[task, layer, run_id]['cancellation']
+                median_cancellation = c_df.loc[task, layer, run_id]['median_cancellation']
+                can_per_infl_method[layer].append(cancellation)
+                mcan_per_infl_method[layer].append(median_cancellation)
+                v = all_df.loc[("hf", "mean", task, layer, run_id)]["best_accuracy_1"]
+                acc_per_infl_method[layer].append(v)                    
+        
+    rows = []
+    for layer in layers:
+        series0 = acc_per_infl_method[layer]
+        series1 = can_per_infl_method[layer]
+        series2 = mcan_per_infl_method[layer]
+
+        s1 = sci_stats.spearmanr(series0, series1)
+        s2 = sci_stats.spearmanr(series0, series2)
+        rows.append([layer,
+            f"{s1.correlation:.1f}" + ("*" if s1.pvalue > 0.05 else ""),
+            # f"{s4.correlation:.1f}" + ("**" if s4.pvalue < 0.05 else ""),
+            f"{s2.correlation:.1f}" + ("*" if s2.pvalue > 0.05 else "")
+        ])
+
+    headers = ["Layers", "$C$", "Median $C$"]
+    with open(f"{out_folder}/tables/spearman-layers-all.tex", "w") as stats_file:
+        s = tabulate(rows, headers=headers, tablefmt="latex_raw", numalign="center", stralign="center")
+        # s = s.replace("\\textbackslash{}", "\\").replace("\\$", "$").replace("hf\_we\_topk\_10", "hf$^{10}_{we}$").replace("hf\_we\_", "hf$_{we}$").replace("\\_", "_").replace("\{", "{").replace("\}", "}").replace("\^{}", "^").replace("lllllllllllllllllllllllll", "l|cccccccccccccccccccccccc").replace("rand", "\\hline rand")
+        print(s, file = stats_file)
+
+    pass 
+
 def load_df(base_path, tasks = benchmark, use_ndr = False,
                 ndr_prefix = "ndr_bl", agg_method_names = None,
                 infl_method_names = None, selected_layers = None,
@@ -4259,7 +4314,7 @@ if __name__ == "__main__":
     # cnts = {s:c for s,c in counts.items() if len(c) < 10}
 
 
-    network = "llama"
+    network = "mistral"
     group_file = "./groups.json"
     base_path = f"data/{network}"
     selected_layers = network_layers[network]
@@ -4329,11 +4384,14 @@ if __name__ == "__main__":
     #                             res_suffix="all")
     # pass
 
+    run_spearman_total2(out_folder=base_path, layers = selected_layers) #, run_ids = [0,1,2,3,4])
+    pass
+
     # run_spearman_total(out_folder=base_path, layers = selected_layers) #, run_ids = [0,1,2,3,4])
     # create_tun2_agg_metrics_table(out_folder=base_path, res_suffix = res_suffix)
 
-    draw_perf_diffs2(out_folder = base_path, layers = selected_layers,
-                    pvalue = 0.1) # run_ids = [0,1,2,3,4])
+    # draw_perf_diffs2(out_folder = base_path, layers = selected_layers,
+    #                 pvalue = 0.1) # run_ids = [0,1,2,3,4])
     pass
 
     # create_tun2_agg_diffs_table(metric_name="best_accuracy_1", ds_ranks=False, mul = 100, 
@@ -4388,8 +4446,8 @@ if __name__ == "__main__":
     # process_ndr_table(base_path, tasks=benchmark, with_row_id=False, custom_suffix = "-hf",
     #                     agg_method_names=['vote2-c'],
     #                     infl_method_names=['hf'])
-    draw_noise_distr(base_path, tasks=['qnli'], layers = selected_layers, suffix="qnli-n-sm", agg_name="mean",
-                            figsize = (8,1.5), no_left_no_bottom = True)
+    # draw_noise_distr(base_path, tasks=['qnli'], layers = selected_layers, suffix="qnli-n-sm", agg_name="mean",
+    #                         figsize = (8,1.5), no_left_no_bottom = True)
     # pass
     # draw_noise_distr(base_path, tasks=benchmark, layers = selected_layers, suffix="all", agg_name="mean",
     #                     figsize=(8, 10))
@@ -4514,7 +4572,7 @@ if __name__ == "__main__":
         ('rand', '', ''): {'color': 'gray', 'legend_name': 'Random', 'legend_order': 8},        
     }    
 
-    draw_all_tun2_metric(base_path, selected_methods=mistral_selected_methods, suffix="-sm",
+    draw_all_tun2_metric(base_path, selected_methods=llama_selected_methods, suffix="-sm",
                             figsize=(8, 2))
     # roberta_layers = ['WE', '00-05', '06-11', '12-17', '18-23', 'CL']
     # llama_layers = ['WE', '00-03', '04-07', '08-11', '12-15', 'CL']
