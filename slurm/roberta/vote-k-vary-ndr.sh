@@ -5,10 +5,10 @@
 #SBATCH -D /blue/anshumanc.usf/nn-infl/roberta
 #SBATCH -p hpg-b200
 #SBATCH --gpus=1 # 1 GPU
-#SBATCH --mem=16G # default 4GB
+#SBATCH --mem=8G # default 4GB
 #SBATCH --array=0-7%4
 
-module load conda/24.7.1
+module load conda
 conda activate /home/dvitel.usf/torch-env
 
 tasks=("qnli" "mrpc" "sst2" "qqp" "cola" "mnli" "rte" "stsb")
