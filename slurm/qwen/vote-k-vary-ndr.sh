@@ -3,7 +3,7 @@
 #SBATCH --time=96:00:00
 #SBATCH --output 4-ndr-vk-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/qwen
-#SBATCH -p hpg-ai
+#SBATCH -p hpg-b200
 #SBATCH --gpus=1 # 1 GPU
 #SBATCH --mem=16G # default 4GB
 #SBATCH --array=0-7%4
