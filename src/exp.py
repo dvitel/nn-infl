@@ -1128,28 +1128,6 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
     #     fcntl.flock(file, fcntl.LOCK_UN)    
 
 
-agg_method_fns = {
-    "mean": mean_matrix_score,
-    "mean-c": partial(mean_matrix_score, use_correct = True),
-    # "mean-i": partial(mean_matrix_score, use_correct = False),
-    "rank": rank_matrix_score,
-    "rank-c": partial(rank_matrix_score, use_correct = True), 
-    # "rank-i": partial(rank_matrix_score, use_correct = False),
-    "vote": partial(rank_matrix_score, rank_score_fn = vote_matrix_score),
-    "vote-c": partial(rank_matrix_score, rank_score_fn = vote_matrix_score, use_correct = True),
-
-    "cset": cset_matrix_score,
-    "cset-c": partial(cset_matrix_score, use_correct = True),
-
-
-    "vote2": partial(rank_matrix_score, rank_score_fn = vote2_matrix_score),
-    "vote2-c": partial(rank_matrix_score, rank_score_fn = vote2_matrix_score, use_correct = True),
-
-    "rmin": partial(rank_matrix_score, rank_score_fn = min_matrix_score),
-    "rmin-c": partial(rank_matrix_score, rank_score_fn = min_matrix_score, use_correct = True),
-    # add here new agg methods
-}
-
 def load_ds_info(task_in_dir: str, task: str, with_input_ids = False):
     ds_path = os.path.join(task_in_dir, f'd_{task}_{seed}')
     ds = datasets.load_from_disk(ds_path)
@@ -1191,6 +1169,8 @@ def ndr(task = "qnli", infl_methods: str = 'datainf', agg_methods: str = 'mean',
                                     ndr_prefix=ndr_prefix, device = device,
                                     noise_hist_bins = hist_bins)
     pass
+
+from postprocess import agg_methods as agg_method_fns
 
 def scores(task = "qnli", infl_methods: str = 'datainf', agg_methods: str = 'mean', 
                  i_prefix: str = 'i_bl', m_prefix: str = 'm_bl', group_file: str = '',

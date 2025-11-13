@@ -314,7 +314,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "ndr", "--task=qnli", "--infl-methods=hf,datainf", "--agg-methods=mean,mean_10,mean_50,dir,rank,commonset-20,commonsubset-30", "--m-prefix=m_bl", "--i-prefix=i_bl", "--ndr-prefix=ndr_bl", "--group-file=./groups.json"
+                "ndr", "--task=qnli", "--infl-methods=hf,datainf", "--agg-methods=vote2-c-10,vote2-c", "--m-prefix=m_bl", "--i-prefix=i_bl", "--ndr-prefix=ndr_test_k", "--group-file=./groups.json"
             ],
             "env": {
                 "INFL_SEED": "42",

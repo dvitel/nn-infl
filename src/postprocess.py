@@ -1922,6 +1922,56 @@ agg_methods = {
     "vote2": partial(rank_matrix_score, rank_score_fn = vote2_matrix_score),
     "vote2-c": partial(rank_matrix_score, rank_score_fn = vote2_matrix_score, use_correct = True),
 
+    "vote2-c-10": partial(rank_matrix_score, 
+                          rank_score_fn = partial(vote2_matrix_score, 
+                                                  filter_perc=0.1), 
+                          use_correct = True),
+
+    "vote2-c-20": partial(rank_matrix_score, 
+                          rank_score_fn = partial(vote2_matrix_score, 
+                                                  filter_perc=0.2), 
+                          use_correct = True),
+
+    "vote2-c-30": partial(rank_matrix_score, 
+                          rank_score_fn = partial(vote2_matrix_score, 
+                                                  filter_perc=0.3), 
+                          use_correct = True),
+
+    "vote2-c-40": partial(rank_matrix_score, 
+                          rank_score_fn = partial(vote2_matrix_score, 
+                                                  filter_perc=0.4), 
+                          use_correct = True),          
+
+    "vote2-c-50": partial(rank_matrix_score, 
+                          rank_score_fn = partial(vote2_matrix_score, 
+                                                  filter_perc=0.5), 
+                          use_correct = True),   
+
+    "vote2-c-60": partial(rank_matrix_score, 
+                          rank_score_fn = partial(vote2_matrix_score, 
+                                                  filter_perc=0.6), 
+                          use_correct = True),
+
+    "vote2-c-70": partial(rank_matrix_score, 
+                          rank_score_fn = partial(vote2_matrix_score, 
+                                                  filter_perc=0.7), 
+                          use_correct = True),                          
+
+    "vote2-c-80": partial(rank_matrix_score, 
+                          rank_score_fn = partial(vote2_matrix_score, 
+                                                  filter_perc=0.8), 
+                          use_correct = True),  
+
+    "vote2-c-90": partial(rank_matrix_score, 
+                          rank_score_fn = partial(vote2_matrix_score, 
+                                                  filter_perc=0.9), 
+                          use_correct = True),                            
+
+    "vote2-c-100": partial(rank_matrix_score, 
+                          rank_score_fn = partial(vote2_matrix_score, 
+                                                  filter_perc=1.0), 
+                          use_correct = True),                                                    
+
     "rmin": partial(rank_matrix_score, rank_score_fn = min_matrix_score),
     "rmin-c": partial(rank_matrix_score, rank_score_fn = min_matrix_score, use_correct = True),
 
