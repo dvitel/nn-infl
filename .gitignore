@@ -95,6 +95,7 @@ wandb/
 # !LoRA-RoBERTa-MRPC.ipynb
 # *ipynb
 models/
+datasets/**/cache-*.arrow
 
 data
 other

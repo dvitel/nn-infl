@@ -13,11 +13,8 @@ import torch
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import (
-    AutoModelForSequenceClassification, AutoModel,
-    get_cosine_schedule_with_warmup,
-    BitsAndBytesConfig,
-    LlamaForCausalLM,
-    LlamaTokenizer
+    AutoModelForSequenceClassification,
+    get_cosine_schedule_with_warmup, AutoModelForCausalLM
 )
 from peft import (
     LoraConfig,
@@ -62,7 +59,7 @@ def build_LORA_model(model_name_or_path, target_modules, low_rank, unfreeze_modu
 
     model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path,
                                                                     return_dict=True,
-                                                                    torch_dtype = torch.bfloat16,
+                                                                    dtype = torch.bfloat16,
                                                                     offload_folder = os.path.join(os.environ['HF_HOME'], ".offload"),
                                                                     offload_state_dict = True)
     model.config.use_cache = False
@@ -108,13 +105,70 @@ def build_LORA_model(model_name_or_path, target_modules, low_rank, unfreeze_modu
     model_info_str += "\n" + model_info_table
     return model, model_info_str
 
+def build_causal_LORA_model(model_name_or_path, target_modules, low_rank, lora_alpha, unfreeze_modules_regex: Optional[str] = None,
+                        all_token_ids: Optional[torch.Tensor] = None, mapping_tensor: Optional[torch.Tensor] = None,
+                        pad_token_id = None):
+    '''
+    unfreeze_modules - list of additional modules to unfreeze
+    all_token_ids - to resize embeddings
+    '''
+
+    model = AutoModelForCausalLM.from_pretrained(model_name_or_path,
+                return_dict=True,
+                # quantization_config = quantization_config,
+                dtype = torch.bfloat16,
+                offload_folder = os.path.join(os.environ['HF_HOME'], ".offload"),
+                offload_state_dict = True)
+    model.config.use_cache = False
+    model.config.pad_token_id = pad_token_id
+        
+    peft_config = LoraConfig(task_type="CAUSAL_LM",
+                                inference_mode=False, 
+                                target_modules=target_modules,
+                                r=low_rank,
+                                lora_alpha=lora_alpha,                                 
+                                lora_dropout=0.05)
+    model = get_peft_model(model, peft_config)
+
+    if all_token_ids is not None:
+        orig_embeddings = model.get_input_embeddings()
+        new_embedding_matrix = orig_embeddings.weight[all_token_ids]
+        new_pad_token_id = mapping_tensor[pad_token_id]
+        new_embedding_layer = torch.nn.Embedding.from_pretrained(new_embedding_matrix, freeze=False, padding_idx=new_pad_token_id,
+                                                                 max_norm = orig_embeddings.max_norm,
+                                                                 norm_type = orig_embeddings.norm_type,
+                                                                 scale_grad_by_freq = orig_embeddings.scale_grad_by_freq,
+                                                                 sparse = orig_embeddings.sparse)
+        new_embedding_layer.vocab_mapping = mapping_tensor
+        new_embedding_layer.register_forward_pre_hook(vocab_remap_forward_pre_hook)
+        model.set_input_embeddings(new_embedding_layer)
+        for p in new_embedding_layer.parameters():
+            p.requires_grad = False #reuse them
+        # model.tie_weights() - does not work - resort to save our custom embeddings
+
+    unfreeze_modules(model, unfreeze_modules_regex)
+
+    model.print_trainable_parameters()
+    
+    infos = []
+    for module_name, p in model.named_parameters():
+        size_gb = p.numel() * (torch.finfo(p.dtype).bits // 8) / 1024 ** 3
+        shape = [d for d in p.shape]
+        tunable = p.requires_grad
+        infos.append({"name": module_name, "numel": p.numel(), "size_gb": size_gb, "shape": shape, 'tunable': tunable})
+    num_tunable_p, num_all_p = model.get_nb_trainable_parameters()
+    model_info_table = tabulate(infos, headers="keys", tablefmt="github", floatfmt=".3f", showindex=True)
+    model_info_str = "[%s] Num trainable parameters: %d, num all parameters: %d, %.2f" % (model_name_or_path, num_tunable_p, num_all_p, round(num_tunable_p * 100 / num_all_p))
+    model_info_str += "\n" + model_info_table
+    return model, model_info_str
+
 def load_pretrained_LORA_model(model_name_or_path, unfreeze_modules_regex: Optional[str] = None):
     '''
     This function loads a pre-trained model.
     '''
     base_model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path,
                                                                     return_dict=True,
-                                                                    torch_dtype = torch.bfloat16,
+                                                                    dtype = torch.bfloat16,
                                                                     offload_folder = os.path.join(os.environ['HF_HOME'], ".offload"),
                                                                     offload_state_dict = True)                                                                    
     base_model.config.use_cache = False
