@@ -16,6 +16,7 @@ from torch.utils.data import DataLoader
 from lora_model import build_causal_LORA_model
 
 tqdm.pandas()
+torch.cuda.init()
 
 # Define and parse arguments.
 @dataclass
@@ -111,7 +112,7 @@ training_args = SFTConfig(
     save_total_limit=5, 
     max_length=script_args.seq_length,
     dataset_text_field=script_args.dataset_text_field,
-    report_to="none",
+    report_to="none", no_cuda=True,
 )
 
 trainer = SFTTrainer(
