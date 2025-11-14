@@ -9,7 +9,7 @@
 #SBATCH --array=0-0
 
 module load conda
-conda activate /home/dvitel.usf/torch-env
+conda activate /blue/anshumanc.usf/nn-infl/nn-infl-env
 
 task=sentense
 task_cwd=/blue/anshumanc.usf/nn-infl/qwen/$task
