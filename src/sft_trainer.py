@@ -112,7 +112,8 @@ training_args = SFTConfig(
     save_total_limit=5, 
     max_length=script_args.seq_length,
     dataset_text_field=script_args.dataset_text_field,
-    report_to="none", no_cuda=True,
+    report_to="none", 
+    # no_cuda=True,
 )
 
 trainer = SFTTrainer(
