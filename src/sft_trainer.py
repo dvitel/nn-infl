@@ -55,7 +55,7 @@ dataset = load_from_disk(script_args.dataset_name) # should be _train from datas
 
 dataset = dataset.remove_columns(["answer", "prompt"])
 
-# tokenizer = load_tokenizer(script_args.model_name)
+tokenizer = load_tokenizer(script_args.model_name)
 
 # collator = DataCollatorWithPadding(tokenizer=tokenizer, padding="longest", return_tensors="pt", max_length=script_args.seq_length)  
 
@@ -88,7 +88,7 @@ model = AutoModelForCausalLM.from_pretrained(script_args.model_name,
             offload_folder = os.path.join(os.environ['HF_HOME'], ".offload"),
             offload_state_dict = True)
 model.config.use_cache = False
-# model.config.pad_token_id = tokenizer.pad_token_id
+model.config.pad_token_id = tokenizer.pad_token_id
     
 peft_config = LoraConfig(task_type="CAUSAL_LM",
                             inference_mode=False, 
@@ -115,7 +115,7 @@ training_args = SFTConfig(
 
 trainer = SFTTrainer(
     model=model,
-    # processing_class=tokenizer,
+    processing_class=tokenizer,
     args=training_args,
     train_dataset=dataset,
     peft_config=peft_config,
