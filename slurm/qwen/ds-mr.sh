@@ -16,13 +16,15 @@ echo 'Running SFT...'
 task=mathR
 task_cwd=/blue/anshumanc.usf/nn-infl/qwen/$task
 
-HF_TOKEN=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 INFL_SEED=0 python \
-    /home/dvitel.usf/nn-infl/src/sft_trainer.py \
+HF_HOME=/blue/anshumanc.usf/nn-infl/.cache \
+HF_TOKEN=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 \
+INFL_SEED=0 \
+python /home/dvitel.usf/nn-infl/src/sft_trainer.py \
     --model-name Qwen/Qwen2.5-1.5B \
     --dataset-name /home/dvitel.usf/nn-infl/datasets/math_with_reason_train.hf \
     --output-dir $task_cwd/checkpoint \
     --dataset-text-field text \
-    --learning-rate 3e-4 \
+    --learning-rate 1e-3 \
     --batch-size 128 \
     --num-train-epochs 10
 

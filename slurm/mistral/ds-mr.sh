@@ -16,8 +16,10 @@ echo 'Running SFT...'
 task=mathR
 task_cwd=/blue/anshumanc.usf/nn-infl/mistral/$task
 
-HF_TOKEN=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 INFL_SEED=0 python \
-    /home/dvitel.usf/nn-infl/src/sft_trainer.py \
+HF_HOME=/blue/anshumanc.usf/nn-infl/.cache \
+HF_TOKEN=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 \
+INFL_SEED=0 \
+python /home/dvitel.usf/nn-infl/src/sft_trainer.py \
     --model-name mistralai/Mistral-7B-v0.3 \
     --dataset-name /home/dvitel.usf/nn-infl/datasets/math_with_reason_train.hf \
     --output-dir $task_cwd/checkpoint \
