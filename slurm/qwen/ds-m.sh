@@ -8,7 +8,7 @@
 #SBATCH --mem=16G
 #SBATCH --array=0-0
 
-module load conda/24.7.1
+module load conda
 conda activate /home/dvitel.usf/torch-env
 
 task=math
