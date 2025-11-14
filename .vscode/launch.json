@@ -12,6 +12,27 @@
             "console": "integratedTerminal"
         },
         {
+            "name": "SFT_TRAIN sentense",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/sft_trainer.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--model_name", "meta-llama/Llama-3.2-1B",
+                "--dataset_name", "./datasets/grammars_train.hf",
+                "--output_dir", "./data/testing/grammars-llama-3.2-1B",
+                "--dataset_text_field", "text",
+                "--load_in_8bit", 
+                "--use_peft"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "INFL_SEED": "42",
+                "INFL_CWD": "./data/dev/roberta/qnli",
+                "HF_TOKEN": "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"
+            }
+        },        
+        {
             "name": "Init Distilbert",
             "type": "debugpy",
             "request": "launch",
