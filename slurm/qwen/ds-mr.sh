@@ -14,7 +14,7 @@
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi
 
-echo 'Activate environment's
+echo 'Activate environment'
 module load conda
 conda activate /blue/anshumanc.usf/nn-infl/nn-infl-env
 

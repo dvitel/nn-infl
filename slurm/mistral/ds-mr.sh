@@ -14,7 +14,7 @@
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi
 
-echo 'Activate environment's
+echo 'Activate environment'
 module load conda
 conda activate /blue/anshumanc.usf/nn-infl/nn-infl-env
 
@@ -30,7 +30,7 @@ python /home/dvitel.usf/nn-infl/src/sft_trainer.py \
     --dataset-name /home/dvitel.usf/nn-infl/datasets/math_with_reason_train.hf \
     --output-dir $task_cwd/checkpoint \
     --dataset-text-field text \
-    --learning-rate 5e-5 \
+    --learning-rate 3e-4 \
     --batch-size 128 \
     --num-train-epochs 10
 
