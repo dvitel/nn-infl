@@ -84,6 +84,7 @@ print(f"Loading model {script_args.model_name}...")
 model = AutoModelForCausalLM.from_pretrained(script_args.model_name,
             return_dict=True,
             # quantization_config = quantization_config,
+            device_map="auto",
             dtype = torch.bfloat16,
             offload_folder = os.path.join(os.environ['HF_HOME'], ".offload"),
             offload_state_dict = True)
