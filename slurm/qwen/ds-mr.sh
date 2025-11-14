@@ -4,9 +4,15 @@
 #SBATCH --output ds-mr-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/qwen
 #SBATCH -p hpg-b200
-#SBATCH --gpus=1
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=4
+#SBATCH --gres=gpu:1
+#SBATCH --gpus-per-task=1
 #SBATCH --mem=16G
 #SBATCH --array=0-0
+
+echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
+nvidia-smi
 
 echo 'Activate environment's
 module load conda
