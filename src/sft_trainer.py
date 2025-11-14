@@ -49,6 +49,8 @@ class ScriptArguments:
 parser = HfArgumentParser(ScriptArguments)
 script_args = parser.parse_args_into_dataclasses()[0]
 
+print(f"Loading data {script_args.dataset_name}...")
+
 dataset = load_from_disk(script_args.dataset_name) # should be _train from datasetss
 
 dataset = dataset.remove_columns(["answer", "prompt"])
@@ -76,6 +78,8 @@ lora_targets = script_args.lora_targets.split(",") if script_args.lora_targets e
 #             pad_token_id=tokenizer.pad_token_id,
 #             quantization_config=quantization_config,
 #         )
+
+print(f"Loading model {script_args.model_name}...")
 
 model = AutoModelForCausalLM.from_pretrained(script_args.model_name,
             return_dict=True,
@@ -119,9 +123,13 @@ trainer = SFTTrainer(
 )
 # import pdb; pdb.set_trace()
 
+print(f"Training...")
+
 trainer.train()
 
 # Step 6: Save the model
 # import pdb; pdb.set_trace()
+print(f"Saving to {script_args.output_dir}...")
+
 trainer.save_model(script_args.output_dir)
 pass

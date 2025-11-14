@@ -8,9 +8,11 @@
 #SBATCH --mem=16G
 #SBATCH --array=0-0
 
+echo 'Activate environment'
 module load conda
 conda activate /blue/anshumanc.usf/nn-infl/nn-infl-env
 
+echo 'Running SFT...'
 task=sentense
 task_cwd=/blue/anshumanc.usf/nn-infl/qwen/$task
 
@@ -23,3 +25,5 @@ HF_TOKEN=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 INFL_SEED=0 python \
     --learning-rate 3e-4 \
     --batch-size 128 \
     --num-train-epochs 10
+
+echo 'Done SFT'
