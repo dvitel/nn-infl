@@ -375,6 +375,27 @@
             }
         },
         {
+            "name": "AUC Recall Sentense QWEN 2.5 0.5",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "auc-recall", 
+                "--task=sentense",
+                "--infl-methods=hf,cos,datainf,outlier,kr-ekfac", 
+                "--i-prefix=i_s", 
+                "--seeds=42",
+                "--s-prefix=metrics"
+            ],
+            "env": {
+                "INFL_SEED": "42",
+                "INFL_CWD": "./data/dev/qwen/sentense",
+                "HF_TOKEN": "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",
+                "HF_HOME": "./.cache"
+            }
+        },        
+        {
             "name": "NDR QNLI",
             "type": "debugpy",
             "request": "launch",

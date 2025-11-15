@@ -28,6 +28,7 @@ for run_id in {0..4}; do
     HF_HOME=/blue/anshumanc.usf/nn-infl/.cache \
     HF_TOKEN=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 \
     INFL_SEED=$run_id \
+    INFL_CWD=$task_cwd \
     python /home/dvitel.usf/nn-infl/src/sft_trainer.py \
         --model-name mistralai/Mistral-7B-v0.3 \
         --dataset-name /home/dvitel.usf/nn-infl/datasets/$dataset.hf \

@@ -1645,6 +1645,13 @@ def auc_recall(task = "sentense", infl_methods: str = 'hf,cos,datainf,outlier,kr
     n_sample_per_class = 90 
     n_class = 10
 
+    def extract_qv(name: str) -> str:
+        if ".q_proj" in name:
+            return "q"
+        elif ".v_proj" in name:
+            return "v"
+        raise ValueError(f"Unknown module name {name}")
+
     def extract_module(name: str) -> str: # either lora A or B
         if "lora_A" in name:
             return "A"
@@ -1668,7 +1675,7 @@ def auc_recall(task = "sentense", infl_methods: str = 'hf,cos,datainf,outlier,kr
             infl_scores = torch.load(infl_score_path)
 
             for module_name, module_scores in infl_scores.items():
-                module_type = extract_module(module_name)
+                module_type = f"{extract_module(module_name)} {extract_qv(module_name)}"
                 layer = extract_layer(module_name)
                 aucs = []
                 recalls = []
@@ -1682,7 +1689,7 @@ def auc_recall(task = "sentense", infl_methods: str = 'hf,cos,datainf,outlier,kr
                     sorted_ids = np.argsort(cur_scores)
                     pick_most_infl = sorted_ids[-n_sample_per_class:] // n_sample_per_class
                     correct_label = i // (n_val / n_class)
-                    recall = np.count_nonzero(pick_most_infl == correct_label)
+                    recall = np.count_nonzero(pick_most_infl == correct_label) / float(n_sample_per_class)
                     recalls.append(recall)
 
                 auc_mean = np.mean(aucs)
@@ -1691,9 +1698,8 @@ def auc_recall(task = "sentense", infl_methods: str = 'hf,cos,datainf,outlier,kr
                 recall_mean = np.mean(recalls)
                 recall_std = np.std(recalls)
 
-                row = {"method": method, "module": module_type, "layer": layer, "seed": seed, "auc_mean": auc_mean, "auc_std": auc_std, "recall_mean": recall_mean, "recall_std": recall_std}
+                row = {"method": method, "module": module_type, "layer": layer, "seed": seed, "auc_mean": auc_mean, "auc_std": auc_std, "recall_mean": recall_mean, "recall_std": recall_std, "full_module": module_name}
                 metrics.append(row)
-
 
     metrics_df = pd.DataFrame(metrics)
     output_dir = os.path.join(cwd, f"{s_prefix}_{task}.csv")
@@ -1937,7 +1943,7 @@ def finetune2(task = 'qnli',
 parser = argh.ArghParser()
 parser.add_commands([preprocess, init_checkpoint, finetune, grads, infl, infl_matrix, scores, 
                      ndr, finetune2, infl_noise, set_logits, cancel_eff, combine_cancel,
-                     infl_matrix_causal, kronfl])
+                     infl_matrix_causal, kronfl, auc_recall])
 
 def test_infl_vs_infl_matrix(file1: str, file2: str):
     infl = torch.load(file1)
