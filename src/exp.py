@@ -1,3 +1,13 @@
+import warnings
+import traceback
+
+def warn_with_traceback(message, category, filename, lineno, file=None, line=None):
+    print("⚠️ WARNING CAUGHT")
+    print(message)
+    traceback.print_stack()
+
+warnings.showwarning = warn_with_traceback
+
 from collections import defaultdict
 import fcntl
 from functools import partial
