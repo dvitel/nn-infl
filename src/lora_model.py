@@ -247,9 +247,7 @@ def load_causal_LORA_model(model_name_or_path):
     base_model.config.use_cache = False
     if hasattr(base_model, "peft_config") and base_model.peft_config is not None:
         model = base_model
-        print(f"Model loaded successfully with existing PEFT adapters.")
-        if not model.peft_config.is_trainable:
-            print("Model is not trainable")
+        print(f"Model loaded successfully with existing PEFT adapters. {base_model.peft_config}")
     else:
         print("Model loaded as a standard base model without PEFT config.")
         model = PeftModel.from_pretrained(base_model, model_name_or_path, is_trainable=True)        
