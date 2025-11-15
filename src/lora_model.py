@@ -245,7 +245,13 @@ def load_causal_LORA_model(model_name_or_path):
                                                     offload_folder = os.path.join(os.environ['HF_HOME'], ".offload"),
                                                     offload_state_dict = True)                                                                    
     base_model.config.use_cache = False
-    model = PeftModel.from_pretrained(base_model, model_name_or_path, is_trainable=True)
+    if not isinstance(base_model, PeftModel):
+        model = PeftModel.from_pretrained(base_model, model_name_or_path, is_trainable=True)        
+    else:
+        print("Model is already a PeftModel, skipping peft installment")
+        if not model.peft_config.is_trainable:
+            print("Model is not trainable")
+        model = base_model
     return model
 
 def save_checkpoint(model: torch.nn.Module, checkpoint_path: str):
