@@ -24,7 +24,7 @@ task_cwd=/blue/anshumanc.usf/nn-infl/qwen/$task
 
 HF_HOME=/blue/anshumanc.usf/nn-infl/.cache \
 HF_TOKEN=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 \
-INFL_SEED=$run_id \
+INFL_SEED=0 \
 INFL_CWD=$task_cwd \
 python /home/dvitel.usf/nn-infl/src/exp.py auc-recall \
     --task $task \
