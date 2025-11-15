@@ -1397,7 +1397,7 @@ def kronfl(task='sentense',
                     analysis_name=dataset, 
                     model=model, 
                     task=fl_task,
-                    output_dir=f"{cwd}/kronfl_{method}"
+                    output_dir=f"{cwd}/kronfl_{method}_{seed}"
                 )
 
     collator = DataCollatorWithPadding(tokenizer=tokenizer, padding="longest", return_tensors="pt")  

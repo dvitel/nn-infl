@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 import os
-from random import random
+import random
 from typing import Optional
 import numpy as np
 import torch

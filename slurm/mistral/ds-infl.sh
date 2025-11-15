@@ -23,34 +23,40 @@ dataset=${datasets[$SLURM_ARRAY_TASK_ID]}
 
 task_cwd=/blue/anshumanc.usf/nn-infl/mistral/$task
 
-HF_HOME=/blue/anshumanc.usf/nn-infl/.cache \
-HF_TOKEN=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 \
-INFL_SEED=0 \
-INFL_CWD=$task_cwd \
-python /home/dvitel.usf/nn-infl/src/exp.py infl-matrix-causal \
-    --task $task \
-    --methods hf,cos,datainf,outlier \
-    --mem-koef 1.1 \
-    --checkpoint checkpoint \
-    --dataset $dataset \
-    --dataset-path /home/dvitel.usf/nn-infl/datasets \
-    --i-prefix i_ds
+for run_id in {0..4}; do
+    echo "Seed $run_id"
+    HF_HOME=/blue/anshumanc.usf/nn-infl/.cache \
+    HF_TOKEN=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 \
+    INFL_SEED=$run_id \
+    INFL_CWD=$task_cwd \
+    python /home/dvitel.usf/nn-infl/src/exp.py infl-matrix-causal \
+        --task $task \
+        --methods hf,cos,datainf,outlier \
+        --mem-koef 1.1 \
+        --checkpoint m_ds \
+        --dataset $dataset \
+        --dataset-path /home/dvitel.usf/nn-infl/datasets \
+        --i-prefix i_ds
+done
 
 echo 'Done influences'
 
 echo 'Computing kronfluence...'
 
-HF_HOME=/blue/anshumanc.usf/nn-infl/.cache \
-HF_TOKEN=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 \
-INFL_SEED=0 \
-INFL_CWD=$task_cwd \
-python /home/dvitel.usf/nn-infl/src/exp.py kronfl \
-    --task $task \
-    --method ekfac \
-    --checkpoint checkpoint \
-    --dataset $dataset \
-    --dataset-path /home/dvitel.usf/nn-infl/datasets \
-    --i-prefix i_ds
+for run_id in {0..4}; do
+    echo "Seed $run_id"
+    HF_HOME=/blue/anshumanc.usf/nn-infl/.cache \
+    HF_TOKEN=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 \
+    INFL_SEED=$run_id \
+    INFL_CWD=$task_cwd \
+    python /home/dvitel.usf/nn-infl/src/exp.py kronfl \
+        --task $task \
+        --method ekfac \
+        --checkpoint m_ds \
+        --dataset $dataset \
+        --dataset-path /home/dvitel.usf/nn-infl/datasets \
+        --i-prefix i_ds
+done
 
 
 echo 'Done kronfluence'
