@@ -1419,8 +1419,10 @@ def kronfl(task='sentense',
         factors_name=method,
         query_dataset=eval_dataset,
         train_dataset=train_dataset,
-        per_device_query_batch_size=16,
-        per_device_train_batch_size=16,
+        # per_device_query_batch_size=16,
+        # per_device_train_batch_size=16,
+        per_device_query_batch_size=1,
+        per_device_train_batch_size=1,
         overwrite_output_dir=True,
     )
 
