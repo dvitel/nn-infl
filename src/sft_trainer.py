@@ -10,10 +10,10 @@ from transformers import AutoModelForCausalLM, HfArgumentParser, TrainingArgumen
 
 from trl import SFTTrainer, SFTConfig
 
-from exp import load_tokenizer, present_token_ids
+from exp import present_token_ids
 from torch.utils.data import DataLoader
 
-from lora_model import build_causal_LORA_model
+from lora_model import build_causal_LORA_model, load_tokenizer
 
 tqdm.pandas()
 torch.cuda.init()

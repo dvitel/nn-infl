@@ -14,7 +14,7 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import (
     AutoModelForSequenceClassification,
-    get_cosine_schedule_with_warmup, AutoModelForCausalLM
+    get_cosine_schedule_with_warmup, AutoModelForCausalLM, AutoTokenizer
 )
 from peft import (
     LoraConfig,
@@ -189,6 +189,63 @@ def load_pretrained_LORA_model(model_name_or_path, unfreeze_modules_regex: Optio
     unfreeze_modules(model, unfreeze_modules_regex)
     
     model.print_trainable_parameters()
+    return model
+
+def load_tokenizer(tokenizer_name):
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, padding_side="right")
+    #   `(tokenizer.pad_token = tokenizer.eos_token e.g.)` or add a new pad token via `tokenizer.add_special_tokens({'pad_token': '[PAD]'})`.    
+
+    # for llama v3.2
+    if "Llama-3.2" in tokenizer_name:          
+        tokenizer.pad_token = "<|reserved_special_token_0|>"
+        tokenizer.pad_token_id = tokenizer.vocab[tokenizer.pad_token]
+    elif ("Llama" in tokenizer_name) or ("mistral" in tokenizer_name):
+        tokenizer.pad_token = tokenizer.unk_token
+        tokenizer.pad_token_id = tokenizer.unk_token_id
+
+    return tokenizer
+
+def load_causal_tokenizer(tokenizer_name):
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, padding_side="right")
+
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+
+    return tokenizer
+
+def causal_tokenize(tokenizer, *, device, dataset, **datasets):
+    tokenize_func = lambda x: tokenizer(
+        x["prompt"], truncation=True, padding=True, max_length=128, return_tensors="pt" # text should be more appropritate
+    ).to(device)
+
+    if 'with_reason' in dataset:
+        column_list=["text", "answer", "variation", "prompt", "reason"]
+    else:
+        column_list=["text", "answer", "variation", "prompt"]
+
+    tokenized_datasets = {
+        k: v.map(
+            tokenize_func,
+            batched=True,
+            remove_columns=column_list,
+        ) for k, v in datasets.items()
+    }
+    # collate_fn = lambda x: tokenizer.pad(x, padding="longest", return_tensors="pt")
+
+    return tokenized_datasets 
+
+def load_causal_LORA_model(model_name_or_path):
+    '''
+    This function loads a pre-trained causal model.
+    '''
+
+    base_model = AutoModelForCausalLM.from_pretrained(model_name_or_path,
+                                                    dtype = torch.bfloat16,
+                                                    offload_folder = os.path.join(os.environ['HF_HOME'], ".offload"),
+                                                    offload_state_dict = True)                                                                    
+    base_model.config.use_cache = False
+    model = PeftModel.from_pretrained(base_model, model_name_or_path, is_trainable=True)
     return model
 
 def save_checkpoint(model: torch.nn.Module, checkpoint_path: str):

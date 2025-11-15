@@ -4,8 +4,10 @@ from functools import partial
 import json
 import os
 import re
+from typing import Any, Dict, List, Optional, Union
 
 import datasets
+from kronfluence import Analyzer, FactorArguments, ScoreArguments, Task, prepare_model
 from tqdm import tqdm
 
 from postprocess import compute_ndr_metrics_table, cset_matrix_score, mean_matrix_score, min_matrix_score, rank_matrix_score, vote2_matrix_score, vote_matrix_score
@@ -15,12 +17,15 @@ import random
 
 import argh
 import numpy as np
-from lora_model import build_LORA_model, save_checkpoint, train_LORA_model, load_pretrained_LORA_model, compute_grads
+from lora_model import build_LORA_model, causal_tokenize, load_causal_tokenizer, load_tokenizer, save_checkpoint, train_LORA_model, load_pretrained_LORA_model, compute_grads, load_causal_LORA_model
 from influence import compute_hessian_free_influences, compute_datainf_influences, compute_lissa_influences, compute_accurate_influences
 import torch
 from transformers import AutoTokenizer, DataCollatorWithPadding
 from datasets import load_dataset, load_from_disk, Dataset, ClassLabel
 from torch.utils.data import DataLoader
+from kronfluence.utils.common.factor_arguments import all_low_precision_factor_arguments
+from kronfluence.utils.common.score_arguments import all_low_precision_score_arguments
+from kronfluence.utils.dataset import DataLoaderKwargs
 
 if torch.cuda.is_available():
     torch.cuda.init()
@@ -131,19 +136,6 @@ def load_noisy_dataset_by_task(task, infl_ratio = 0.5, max_val_size = None, max_
     # glue_datasets.pop('test')
     
     return glue_datasets
-
-def load_tokenizer(tokenizer_name):
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, padding_side="right")
-    #   `(tokenizer.pad_token = tokenizer.eos_token e.g.)` or add a new pad token via `tokenizer.add_special_tokens({'pad_token': '[PAD]'})`.    
-
-    # for llama v3.2
-    if "Llama-3.2" in tokenizer_name:          
-        tokenizer.pad_token = "<|reserved_special_token_0|>"
-        tokenizer.pad_token_id = tokenizer.vocab[tokenizer.pad_token]
-    elif ("Llama" in tokenizer_name) or ("mistral" in tokenizer_name):
-        tokenizer.pad_token = tokenizer.unk_token
-        tokenizer.pad_token_id = tokenizer.unk_token_id
-    return tokenizer
 
 def preprocess(task = 'qnli', noise_ratio = 0.2, tokenizer_name='roberta-large'):
     ''' Preprocoess GLUE dataset of specific task '''
@@ -611,7 +603,8 @@ class DatasetSplits:
 def pick_modules_and_split_size(active_modules_sorted: list[tuple[str, int, torch.nn.Parameter]], train_num_samples: int, val_num_samples: int, 
                             method_memory_koef: float = 1.0,
                             memory_delta: float = 0.5,
-                            device = "cuda"):
+                            device = "cuda", 
+                            force_val_size: bool = False):
     ''' Computes necessary memory for the grads and outputs suggestion for the adjusted dataset size
         Param active_modules - list of module_name and its size in bytes
         Param method_memory_koef allows to scale memory requirement, for instance hessian-free influence would not require more memory than grads,
@@ -657,21 +650,25 @@ def pick_modules_and_split_size(active_modules_sorted: list[tuple[str, int, torc
         selected_index = 1     
         # too_big_WARN = True 
 
-    if estimated_num_samples >= total_num_samples:
-        estimated_num_samples = total_num_samples   
-        estimated_train_size = train_num_samples
+    if force_val_size:
         estimated_val_size = val_num_samples
+        estimated_train_size = max(1, estimated_num_samples - estimated_val_size)
     else:
-        estimated_train_size = round(train_num_samples * estimated_num_samples / total_num_samples)
-        estimated_val_size = estimated_num_samples - estimated_train_size
+        if estimated_num_samples >= total_num_samples:
+            estimated_num_samples = total_num_samples   
+            estimated_train_size = train_num_samples
+            estimated_val_size = val_num_samples
+        else:
+            estimated_train_size = round(train_num_samples * estimated_num_samples / total_num_samples)
+            estimated_val_size = estimated_num_samples - estimated_train_size
 
-    if estimated_val_size == 0:
-        estimated_train_size -= 1
-        estimated_val_size = 1
+        if estimated_val_size == 0:
+            estimated_train_size -= 1
+            estimated_val_size = 1
 
-    if estimated_train_size == 0:
-        # not enough memory to process
-        estimated_train_size = 1
+        if estimated_train_size == 0:
+            # not enough memory to process
+            estimated_train_size = 1
 
     selected_module_names = [module[0] for module in active_modules_sorted[:selected_index]]
     selected_module_names_str = ','.join(selected_module_names)
@@ -724,9 +721,12 @@ def get_infl_loader(dataset: Dataset, collator):
                     batch_size=1)
     return dataloader
 
-def set_grad_values(all_grads: list[torch.Tensor], model: torch.nn.Module, active_params: list, dataloader: DataLoader, device = "cuda"):     
+def set_grad_values(all_grads: list[torch.Tensor], model: torch.nn.Module, active_params: list, dataloader: DataLoader, device = "cuda",
+                        autoregressive: bool = False):     
     for sampleId, batch in enumerate(dataloader):
         model.zero_grad()
+        if autoregressive: # labels are inputs - teacher forcing
+            batch["labels"] = batch["input_ids"]
         batch.to(device)
         outputs = model(**batch)
         loss = outputs.loss
@@ -837,6 +837,35 @@ def matrix_datainf_fn(__: torch.Tensor, val_grad: torch.Tensor, train_grad: torc
     del tmp_prod2
     pass
 
+from sklearn.svm import OneClassSVM
+# TODO: check batching and averaging on top. 
+def outlier_fn(int_view: torch.Tensor, val_grad: torch.Tensor, train_grad: torch.Tensor, *, 
+                detector_fn = OneClassSVM, full_val_size, **_) -> None:
+
+    assert full_val_size == val_grad.shape[0], f"To fit grad region we need all validation gradients. Given {val_grad.shape[0]}, total {full_val_size}"
+    val_grad_flat = val_grad.view(val_grad.shape[0], -1)
+    val_grad_flat_tmp = val_grad_flat.float()
+    val_grad_np = val_grad_flat_tmp.cpu().numpy()
+    detector = detector_fn()
+    detector.fit(val_grad_np)
+    train_grad_flat = train_grad.view(train_grad.shape[0], -1)
+    train_grad_flat_tmp = train_grad_flat.float()
+    train_grad_np = train_grad_flat_tmp.cpu().numpy()
+    scores = detector.decision_function(train_grad_np)
+    scores_tmp = torch.tensor(scores, device=int_view.device, dtype=int_view.dtype)
+    int_view[:] = scores_tmp
+    del val_grad_flat, train_grad_flat, val_grad_flat_tmp, train_grad_flat_tmp, scores_tmp
+    pass 
+
+# TODO:
+def kronfl_fn(int_view: torch.Tensor, val_grad: torch.Tensor, train_grad: torch.Tensor, **_) -> None:
+    val_grad_flat = val_grad.view(val_grad.shape[0], -1)
+    train_grad_flat = train_grad.view(train_grad.shape[0], -1)
+    tmp_prods = torch.einsum('ik,jk->ij', val_grad_flat, train_grad_flat)
+    int_view[:] = tmp_prods
+    del tmp_prods, val_grad_flat, train_grad_flat
+    pass
+
 # def matrix_lissa_fn(int_view: torch.Tensor, val_grad: torch.Tensor, train_grad: torch.Tensor, lambda_const_param = 10, n_iteration=10, alpha_const=1.) -> None:
 #     n_train = train_grad.shape[0]
 #     module_train_grad_squares = train_grad ** 2
@@ -924,7 +953,9 @@ matrix_infl_methods = {
     # "cov_we": partial(common_we, base_method_fn=matrix_cov_fn),
     "datainf_one": matrix_datainf_one_sample_fn,
     'datainf': matrix_datainf_fn,
-    'datainf0': partial(matrix_datainf_fn, use_orig_def=True)
+    'datainf0': partial(matrix_datainf_fn, use_orig_def=True),
+    'outlier': outlier_fn,
+    'kronfl': kronfl_fn,
     # "datainf_we": partial(common_we, base_method_fn=matrix_datainf_fn),
     # "lissa": matrix_lissa_fn,
     # "lissa_we": partial(common_we, base_method_fn=matrix_lissa_fn),
@@ -1064,7 +1095,7 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
             with open(common_tokens_ds, 'wb') as file:
                 pickle.dump(common_tokens, file)
 
-    methods_without_we = ['datainf', 'datainf0' ]
+    methods_without_we = ['datainf', 'datainf0', 'outlier', 'kronfl' ]
     interaction_matrices = {method_name: {module_name: torch.zeros((len(valset), len(trainset)), dtype=torch.bfloat16, device=device)                                             
                                             for module_name, _, module_params in active_modules
                                             if ((method_name in methods_without_we) and (module_params.numel() < 100000)) or
@@ -1076,8 +1107,13 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
 
     all_active_modules = [(name, size, params) for name, size, params in active_modules if name in interaction_modules]
 
+    force_val_size_for_methods = ['outlier']
+    force_val_size = any(method_name in force_val_size_for_methods for method_name in method_names)
+
     while len(all_active_modules) > 0:
-        selected_module_count, train_size, test_size = pick_modules_and_split_size(all_active_modules, len(trainset), len(valset), method_memory_koef=mem_koef, memory_delta=mem_delta, device=device)
+        selected_module_count, train_size, test_size = pick_modules_and_split_size(
+            all_active_modules, len(trainset), len(valset), method_memory_koef=mem_koef, 
+            memory_delta=mem_delta, device=device, force_val_size=force_val_size)
         cur_active_modules = all_active_modules[:selected_module_count]
         all_active_modules = all_active_modules[selected_module_count:]
         cur_params = CurrentActiveModules(cur_active_modules, active_modules)
@@ -1105,7 +1141,7 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
                             method_fn(cur_int_matrix_view, val_grads[cur_module_id], train_grads[cur_module_id],
                                     module_name = module_name, infl_context = infl_contexts[method_name],
                                     train_shift=train_shift, val_shift=val_shift, 
-                                    full_train_size = len(trainset), full_val_size = len(valset),
+                                    full_train_size=len(trainset), full_val_size=len(valset),
                                     common_tokens=common_tokens)
                 del train_grads
                 torch.cuda.empty_cache() 
@@ -1126,6 +1162,274 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
     #     fcntl.flock(file, fcntl.LOCK_EX)
     #     json.dump(config, file)
     #     fcntl.flock(file, fcntl.LOCK_UN)    
+
+
+def infl_matrix_causal(task='sentense', 
+                       methods="hf,hf_we_,hw_we_topk_10,cos,cov,datainf_one,datainf", 
+                       mem_koef: float = 2.0, 
+                       mem_delta: float = 0.3,
+                       i_prefix='i_ds', 
+                       checkpoint='m_bl',
+                       dataset:str="",
+                       dataset_path:str=".",
+                       device='cuda'):
+
+    # todo check if reequires_grad is attached to embedding
+    model_path = f"{cwd}/{checkpoint}"
+    lora_model = load_causal_LORA_model(model_name_or_path=model_path)
+    lora_model.to(device)
+    lora_model.eval()  
+
+    trainset = Dataset.load_from_disk(f"{dataset_path}/{dataset}_train.hf")
+    valset = Dataset.load_from_disk(f"{dataset_path}/{dataset}_test.hf")
+
+    tokenizer = load_causal_tokenizer(model_path)   
+    
+    datasets = causal_tokenize(tokenizer, device=device, dataset=dataset, train=trainset, validation=valset)
+
+    collator = DataCollatorWithPadding(tokenizer=tokenizer, padding="longest", return_tensors="pt")  
+
+    # torch.backends.cuda.enable_mem_efficient_sdp(False)
+    # torch.backends.cuda.enable_flash_sdp(False)
+
+    # module_filter = ['lora_A', 'lora_B', 'modules_to_save.default.out_proj.weight']
+    # # module_filter = ['modules_to_save.default.out_proj.weight']
+    # for param_name, param_param in lora_model.named_parameters():
+    #     if any([module in param_name for module in module_filter]):
+    #         param_param.requires_grad = True
+    #     else:
+    #         param_param.requires_grad = False
+
+    active_modules = [(name, param.numel() * (torch.finfo(param.dtype).bits // 8), param) for name, param in lora_model.named_parameters() if param.requires_grad]
+    active_modules.sort(key=lambda x: x[1], reverse=True)
+
+    # dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
+
+    # tokenizer = load_tokenizer(config['tokenizer_name'])
+    # collator = DataCollatorWithPadding(tokenizer=tokenizer, padding="longest", return_tensors="pt")  
+
+    # method_fn = matrix_infl_methods[method]
+    method_names = [name for name in methods.split(',') if name in matrix_infl_methods]
+
+    trainset = datasets['train']#.select(range(100))
+    valset = datasets['validation']#.select(range(100))
+
+    common_tokens = {}
+
+    # if any('_we_' in method_name for method_name in method_names):
+    #     common_tokens_ds = os.path.join(cwd, f'common_tokens_{task}_{seed}.pkl')
+    #     should_recompute = False
+    #     try:
+    #         with open(common_tokens_ds, 'rb') as file:
+    #             common_tokens = pickle.load(file)
+    #     except:
+    #         should_recompute = True
+    #     if should_recompute:
+    #         # need to compute common tokens         
+    #         vocab_remap = lora_model.get_input_embeddings().vocab_mapping.tolist()
+    #         train_token_counts = {}
+    #         for train_id in range(len(trainset)):
+    #             cur_train_token_counts = train_token_counts.setdefault(train_id, {})
+    #             for token_id in trainset[train_id]['input_ids']:
+    #                 remapped_token_id = vocab_remap[token_id]
+    #                 cur_train_token_counts[remapped_token_id] = cur_train_token_counts.get(remapped_token_id, 0) + 1
+    #         val_token_counts = {}
+    #         for val_id in range(len(valset)):
+    #             cur_val_token_counts = val_token_counts.setdefault(val_id, {})
+    #             for token_id in valset[val_id]['input_ids']:
+    #                 remapped_token_id = vocab_remap[token_id]
+    #                 cur_val_token_counts[remapped_token_id] = cur_val_token_counts.get(remapped_token_id, 0) + 1
+    #         for train_id, train_token_count in train_token_counts.items():
+    #             for val_id, val_token_count in val_token_counts.items():
+    #                 common_token_ids = set(train_token_count.keys()).intersection(val_token_count.keys())
+    #                 common_tokens[(train_id, val_id)] = {token_id: (train_token_count[token_id], val_token_count[token_id]) for token_id in common_token_ids}
+    #         with open(common_tokens_ds, 'wb') as file:
+    #             pickle.dump(common_tokens, file)
+
+    methods_without_we = ['datainf', 'datainf0', 'outlier' ] #'kronfl' ]
+    interaction_matrices = {method_name: {module_name: torch.zeros((len(valset), len(trainset)), dtype=torch.bfloat16, device=device)                                             
+                                            for module_name, _, module_params in active_modules
+                                            if ((method_name in methods_without_we) and (module_params.numel() < 100000)) or
+                                                ((method_name not in methods_without_we) and ('_we_' not in method_name)) or 
+                                                ((method_name not in methods_without_we) and ('_we_' in method_name) and is_embedding_module(module_name))} 
+                                for method_name in method_names}
+    
+    interaction_modules = set([module_name for int_matrices in interaction_matrices.values() for module_name in int_matrices.keys()])
+
+    all_active_modules = [(name, size, params) for name, size, params in active_modules if name in interaction_modules]
+
+    force_val_size_for_methods = ['outlier']
+    force_val_size = any(method_name in force_val_size_for_methods for method_name in method_names)
+
+    while len(all_active_modules) > 0:
+        selected_module_count, train_size, test_size = pick_modules_and_split_size(
+            all_active_modules, len(trainset), len(valset), method_memory_koef=mem_koef, 
+            memory_delta=mem_delta, device=device, force_val_size=force_val_size)
+        cur_active_modules = all_active_modules[:selected_module_count]
+        all_active_modules = all_active_modules[selected_module_count:]
+        cur_params = CurrentActiveModules(cur_active_modules, active_modules)
+        infl_contexts = {method_name: {} for method_name in method_names} # methods could store arbitrary data here between calls to method_fn
+        with cur_params:
+            train_val_splits = DatasetSplits(trainset, train_size, valset, test_size)
+
+            val_grads = None
+
+            for val_shift, cur_val_dataset, train_shift, cur_train_dataset in tqdm(train_val_splits): 
+                if train_shift == 0:
+                    if val_grads is not None:
+                        del val_grads
+                    val_grads = cur_params.alloc_grads(len(cur_val_dataset))
+                    val_dataloader = get_infl_loader(cur_val_dataset, collator)
+                    set_grad_values(val_grads, lora_model, cur_params.get_cur_params(), val_dataloader, device=device,
+                        autoregressive=True)
+                train_grads = cur_params.alloc_grads(len(cur_train_dataset))
+                train_dataloader = get_infl_loader(cur_train_dataset, collator)
+                set_grad_values(train_grads, lora_model, cur_params.get_cur_params(), train_dataloader, device=device,
+                    autoregressive=True)
+                for method_name, module_int_matrices in interaction_matrices.items():
+                    for cur_module_id, module_name in cur_params.enumerate_names():
+                        if module_name in module_int_matrices:
+                            cur_int_matrix_view = module_int_matrices[module_name][val_shift:val_shift + len(cur_val_dataset), train_shift:train_shift + len(cur_train_dataset)]
+                            method_fn = matrix_infl_methods[method_name]
+                            method_fn(cur_int_matrix_view, val_grads[cur_module_id], train_grads[cur_module_id],
+                                    module_name = module_name, infl_context = infl_contexts[method_name],
+                                    train_shift=train_shift, val_shift=val_shift, 
+                                    full_train_size=len(trainset), full_val_size=len(valset),
+                                    common_tokens=common_tokens)
+                del train_grads
+                torch.cuda.empty_cache() 
+            if val_grads is not None:
+                del val_grads
+            for method_name, method_infl_context in infl_contexts.items():
+                if 'continuation' in method_infl_context:
+                    cur_int_matrices = interaction_matrices[method_name]
+                    method_infl_context['continuation'](cur_int_matrices, **method_infl_context)
+        pass 
+
+
+    for method_name, infl_matrices in interaction_matrices.items():
+        infl_path = os.path.join(cwd, f'{i_prefix}_{method_name}_{task}_{seed}.pt')
+        torch.save(infl_matrices, infl_path)
+
+    # with open(config_path, 'w') as file:
+    #     fcntl.flock(file, fcntl.LOCK_EX)
+    #     json.dump(config, file)
+    #     fcntl.flock(file, fcntl.LOCK_UN)    
+
+class KronfluenceTask(Task):
+    def __init__(self, model: torch.nn.Module, autoregressive: bool = False, device: str = "cuda",
+                 target_modules: list[str] = ["q_proj", "v_proj", "modules_to_save.default.out_proj"]):
+        super().__init__()
+        self.autoregressive = autoregressive
+        self.device = device
+        self.model = model
+        self.target_modules = target_modules
+
+    def compute_train_loss(
+        self,
+        batch: Any,
+        model: torch.nn.Module,
+        sample: bool = False,
+    ) -> torch.Tensor:
+        # TODO: Complete this method.
+        if self.autoregressive: # labels are inputs - teacher forcing
+            batch["labels"] = batch["input_ids"]
+        batch.to(self.device)
+        outputs = model(**batch)
+        loss = outputs.loss
+        return loss
+
+    def compute_measurement(
+        self,
+        batch: Any,
+        model: torch.nn.Module,
+    ) -> torch.Tensor:
+        return self.compute_train_loss(batch, model)
+
+    def get_influence_tracked_modules(self) -> Optional[List[str]]:
+        collected_names = []
+        for name, module in self.model.named_modules():
+            if any(target_module in name for target_module in self.target_modules) \
+                and isinstance(module, torch.nn.Linear) and "base_layer" not in name:
+                collected_names.append(name)
+        return collected_names
+
+    def get_attention_mask(self, batch: Any) -> Optional[Union[Dict[str, torch.Tensor], torch.Tensor]]:
+        # TODO: [Optional] Complete this method.
+        if "attention_mask" in batch:
+            return batch["attention_mask"]
+        return None  # Attention mask not used.
+
+def kronfl(task='sentense', 
+            method="ekfac", 
+            checkpoint='m_bl',
+            dataset:str="",
+            dataset_path:str=".",
+            device='cuda',
+            i_prefix='i_ds'):
+
+    model_path = f"{cwd}/{checkpoint}"
+    tokenizer = load_causal_tokenizer(model_path)
+    model = load_causal_LORA_model(model_name_or_path=model_path)
+    model.to(device)
+    model.eval()  
+
+    train_dataset = Dataset.load_from_disk(f"{dataset_path}/{dataset}_train.hf")
+    eval_dataset = Dataset.load_from_disk(f"{dataset_path}/{dataset}_test.hf")
+    datasets = causal_tokenize(tokenizer, device=device, dataset=dataset, train=train_dataset, validation=eval_dataset)
+    train_dataset = datasets["train"]
+    eval_dataset = datasets["validation"]
+
+    fl_task = KronfluenceTask(model, autoregressive = True)
+
+    # Prepare the model for influence computation.
+    model = prepare_model(model=model, task=fl_task)
+    analyzer = Analyzer(
+                    analysis_name=dataset, 
+                    model=model, 
+                    task=fl_task,
+                    output_dir=f"{cwd}/kronfl_{method}"
+                )
+
+    collator = DataCollatorWithPadding(tokenizer=tokenizer, padding="longest", return_tensors="pt")  
+    dataloader_kwargs = DataLoaderKwargs(collate_fn=collator)
+    analyzer.set_dataloader_kwargs(dataloader_kwargs)
+
+    # Fit all EKFAC factors for the given model.
+    factor_args = FactorArguments(strategy=method)
+    # factor_args = all_low_precision_factor_arguments(strategy=factor_strategy, dtype=torch.float16)
+
+    analyzer.fit_all_factors(factors_name=method, 
+                            dataset=train_dataset,
+                            factor_args=factor_args,
+                            overwrite_output_dir=False,
+                            per_device_batch_size=None,
+                            # initial_per_device_batch_size_attempt=512,
+                            )
+
+    score_args = ScoreArguments(
+        compute_per_module_scores=True
+    )
+    # score_args = all_low_precision_score_arguments(dtype=torch.bfloat16)
+
+    # Compute all pairwise influence scores with the computed factors.
+    analyzer.compute_pairwise_scores(
+        score_args = score_args,
+        scores_name=method,
+        factors_name=method,
+        query_dataset=eval_dataset,
+        train_dataset=train_dataset,
+        per_device_query_batch_size=16,
+        per_device_train_batch_size=16,
+        overwrite_output_dir=True,
+    )
+
+    # Load the scores with dimension `len(eval_dataset) x len(train_dataset)`.
+    scores = analyzer.load_pairwise_scores(scores_name=method)
+
+    infl_path = os.path.join(cwd, f'{i_prefix}_kr-{method}_{task}_{seed}.pt')
+    torch.save(scores, infl_path)
+    pass 
 
 
 def load_ds_info(task_in_dir: str, task: str, with_input_ids = False):
@@ -1550,7 +1854,9 @@ def finetune2(task = 'qnli',
         torch.cuda.empty_cache()
 
 parser = argh.ArghParser()
-parser.add_commands([preprocess, init_checkpoint, finetune, grads, infl, infl_matrix, scores, ndr, finetune2, infl_noise, set_logits, cancel_eff, combine_cancel])
+parser.add_commands([preprocess, init_checkpoint, finetune, grads, infl, infl_matrix, scores, 
+                     ndr, finetune2, infl_noise, set_logits, cancel_eff, combine_cancel,
+                     infl_matrix_causal, kronfl])
 
 def test_infl_vs_infl_matrix(file1: str, file2: str):
     infl = torch.load(file1)

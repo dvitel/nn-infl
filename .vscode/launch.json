@@ -12,7 +12,7 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "TRAIN Sentense DistilGPT2",
+            "name": "TRAIN Sentense QWEN 2.5 0.5",
             "type": "debugpy",
             "request": "launch",
             "program": "src/sft_trainer.py",
@@ -20,16 +20,17 @@
             "args": [
                 "--model-name", "Qwen/Qwen2.5-0.5B",
                 "--dataset-name", "./datasets/grammars_train.hf",
-                "--output-dir", "./data/testing/grammars-qwen",
+                "--output-dir", "./data/dev/qwen/sentense/checkpoint",
                 "--dataset-text-field", "text",
-                "--batch-size", "16",
-                "--lora-targets", "q_proj,v_proj"
+                "--batch-size", "8",
+                "--lora-targets", "q_proj,v_proj",
+                "--num-train-epochs", "2"
             ],
             "cwd": "${workspaceFolder}",
             "env": {
                 "INFL_SEED": "42",
-                "INFL_CWD": "./data/dev/roberta/qnli",
-                "HF_TOKEN": "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"
+                "HF_TOKEN": "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",
+                "HF_HOME": "./.cache"
             }
         },        
         {
@@ -327,7 +328,52 @@
                 "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev/roberta/qnli"
             }
-        },      
+        },   
+        {
+            "name": "Infl matrix Causal Sentense QWEN 2.5 0.5",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "infl-matrix-causal", 
+                "--task=sentense", 
+                "--methods=hf,cos,datainf,outlier", 
+                "--mem-koef=1.1", 
+                "--checkpoint=checkpoint", 
+                "--dataset=grammars",
+                "--dataset-path=${workspaceFolder}/datasets",
+                "--i-prefix=i_s"
+            ],
+            "env": {
+                "INFL_SEED": "42",
+                "INFL_CWD": "./data/dev/qwen/sentense",
+                "HF_TOKEN": "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",
+                "HF_HOME": "./.cache"
+            }
+        },
+        {
+            "name": "KRONFL Infl matrix Causal Sentense QWEN 2.5 0.5",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "kronfl", 
+                "--task=sentense",
+                "--method=ekfac", 
+                "--checkpoint=checkpoint", 
+                "--dataset=grammars",
+                "--dataset-path=${workspaceFolder}/datasets",
+                "--i-prefix=i_ds"
+            ],
+            "env": {
+                "INFL_SEED": "42",
+                "INFL_CWD": "./data/dev/qwen/sentense",
+                "HF_TOKEN": "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",
+                "HF_HOME": "./.cache"
+            }
+        },
         {
             "name": "NDR QNLI",
             "type": "debugpy",

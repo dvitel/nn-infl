@@ -4364,7 +4364,8 @@ if __name__ == "__main__":
     # cnts = {s:c for s,c in counts.items() if len(c) < 10}
 
 
-    network = "mistral"
+    # network = "mistral"
+    network="roberta"
     group_file = "./groups.json"
     base_path = f"data/{network}"
     selected_layers = network_layers[network]
@@ -4434,7 +4435,7 @@ if __name__ == "__main__":
     #                             res_suffix="all")
     # pass
 
-    run_spearman_total2(out_folder=base_path, layers = selected_layers) #, run_ids = [0,1,2,3,4])
+    # run_spearman_total2(out_folder=base_path, layers = selected_layers) #, run_ids = [0,1,2,3,4])
     pass
 
     # run_spearman_total(out_folder=base_path, layers = selected_layers) #, run_ids = [0,1,2,3,4])
@@ -4464,7 +4465,8 @@ if __name__ == "__main__":
     #                    device = 'cpu')
     # pass
     # agg_method_names = ["mean", "rank", "rmin", "vote"]
-    agg_method_names = ["rank", "rank-c", "mean", "mean-c", "cset", "cset-c", "vote2", "vote2-c"]
+    # agg_method_names = ["rank", "rank-c", "mean", "mean-c", "cset", "cset-c", "vote2", "vote2-c"]
+    agg_method_names = ["vote2-c-10", "vote2-c-20", "vote2-c-30", "vote2-c-40", "vote2-c-50", "vote2-c-60", "vote2-c-70", 'vote2-c-80', 'vote2-c-90', 'vote2-c-100']
     # agg_method_names = ['cset-c']
     dss = ["mrpc", "qnli", "sst2", "qqp", "cola", "mnli", "rte", "stsb"]
     # # dss = ["mrpc", "qnli", "sst2", "qqp"]
@@ -4488,9 +4490,9 @@ if __name__ == "__main__":
     #                             layers=selected_layers, 
     #                             infl_method_names=infl_ms,
     #                             agg_method_names=[am, f'{am}-c'], custom_suffix=f"-{infl_ms[0]}-{am}-s")
-    # process_ndr_table(base_path, tasks=benchmark, with_row_id=False, custom_suffix = "-best", 
-    #                   best_group_by=["infl", "agg"], layers=selected_layers,
-    #                   agg_method_names=agg_method_names)
+    process_ndr_table(base_path, tasks=dss, with_row_id=False, custom_suffix = "-vote-k", 
+                      best_group_by=["infl", "agg"], layers=selected_layers, ndr_prefix="ndr_vote_k",
+                      agg_method_names=agg_method_names)
     # process_ndr_table(base_path, tasks=benchmark, with_row_id=False,
     #                     layers=selected_layers, agg_method_names=agg_method_names)
     # process_ndr_table(base_path, tasks=benchmark, with_row_id=False, custom_suffix = "-hf",
