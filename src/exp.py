@@ -1175,11 +1175,14 @@ def infl_matrix_causal(task='sentense',
                        device='cuda'):
 
     # todo check if reequires_grad is attached to embedding
+
     model_path = f"{cwd}/{checkpoint}"
+    print(f"Loading model {model_path}...")
     lora_model = load_causal_LORA_model(model_name_or_path=model_path)
     lora_model.to(device)
     lora_model.eval()  
 
+    print(f"Loading datasets {dataset} from {dataset_path}...")
     trainset = Dataset.load_from_disk(f"{dataset_path}/{dataset}_train.hf")
     valset = Dataset.load_from_disk(f"{dataset_path}/{dataset}_test.hf")
 
@@ -1261,6 +1264,8 @@ def infl_matrix_causal(task='sentense',
     force_val_size_for_methods = ['outlier']
     force_val_size = any(method_name in force_val_size_for_methods for method_name in method_names)
 
+    print(f"Running influences...")
+
     while len(all_active_modules) > 0:
         selected_module_count, train_size, test_size = pick_modules_and_split_size(
             all_active_modules, len(trainset), len(valset), method_memory_koef=mem_koef, 
@@ -1309,6 +1314,7 @@ def infl_matrix_causal(task='sentense',
 
     for method_name, infl_matrices in interaction_matrices.items():
         infl_path = os.path.join(cwd, f'{i_prefix}_{method_name}_{task}_{seed}.pt')
+        print(f"Saving {infl_path}...")
         torch.save(infl_matrices, infl_path)
 
     # with open(config_path, 'w') as file:
@@ -1369,11 +1375,13 @@ def kronfl(task='sentense',
             i_prefix='i_ds'):
 
     model_path = f"{cwd}/{checkpoint}"
+    print(f"Loading model {model_path}...")
     tokenizer = load_causal_tokenizer(model_path)
     model = load_causal_LORA_model(model_name_or_path=model_path)
     model.to(device)
     model.eval()  
 
+    print(f"Loading datasets {dataset} from {dataset_path}...")
     train_dataset = Dataset.load_from_disk(f"{dataset_path}/{dataset}_train.hf")
     eval_dataset = Dataset.load_from_disk(f"{dataset_path}/{dataset}_test.hf")
     datasets = causal_tokenize(tokenizer, device=device, dataset=dataset, train=train_dataset, validation=eval_dataset)
@@ -1399,6 +1407,8 @@ def kronfl(task='sentense',
     factor_args = FactorArguments(strategy=method)
     # factor_args = all_low_precision_factor_arguments(strategy=factor_strategy, dtype=torch.float16)
 
+    print(f"Fitting all factors...")
+
     analyzer.fit_all_factors(factors_name=method, 
                             dataset=train_dataset,
                             factor_args=factor_args,
@@ -1411,6 +1421,8 @@ def kronfl(task='sentense',
         compute_per_module_scores=True
     )
     # score_args = all_low_precision_score_arguments(dtype=torch.bfloat16)
+
+    print(f"Scoring...")
 
     # Compute all pairwise influence scores with the computed factors.
     analyzer.compute_pairwise_scores(
@@ -1430,6 +1442,7 @@ def kronfl(task='sentense',
     scores = analyzer.load_pairwise_scores(scores_name=method)
 
     infl_path = os.path.join(cwd, f'{i_prefix}_kr-{method}_{task}_{seed}.pt')
+    print(f"Saving {infl_path}...")
     torch.save(scores, infl_path)
     pass 
 
