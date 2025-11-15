@@ -19,7 +19,7 @@ from transformers import (
 from peft import (
     LoraConfig,
     PeftModel,
-    get_peft_model
+    get_peft_model, AutoPeftModelForCausalLM
 )
 from datasets import Dataset
 import evaluate
@@ -240,17 +240,18 @@ def load_causal_LORA_model(model_name_or_path):
     This function loads a pre-trained causal model.
     '''
 
-    base_model = AutoModelForCausalLM.from_pretrained(model_name_or_path,
+    model = AutoPeftModelForCausalLM.from_pretrained(model_name_or_path,
                                                     dtype = torch.bfloat16,
                                                     offload_folder = os.path.join(os.environ['HF_HOME'], ".offload"),
-                                                    offload_state_dict = True)                                                                    
-    base_model.config.use_cache = False
+                                                    offload_state_dict = True,
+                                                    is_trainable = True)                                                                    
+    model.config.use_cache = False
     # if hasattr(base_model, "peft_config") and base_model.peft_config is not None:
     #     model = base_model
     #     print(f"Model loaded successfully with existing PEFT adapters. {base_model.peft_config}")
     # else:
     #     print("Model loaded as a standard base model without PEFT config.")
-    model = PeftModel.from_pretrained(base_model, model_name_or_path, is_trainable=True)        
+    # model = PeftModel.from_pretrained(base_model, model_name_or_path, is_trainable=True)        
     return model
 
 def save_checkpoint(model: torch.nn.Module, checkpoint_path: str):
