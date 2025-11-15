@@ -1388,7 +1388,7 @@ def kronfl(task='sentense',
             device='cuda',
             i_prefix='i_ds'):
 
-    model_path = f"{cwd}/{checkpoint}"
+    model_path = f"{cwd}/{checkpoint}_{seed}"
     print(f"Loading model {model_path}...")
     tokenizer = load_causal_tokenizer(model_path)
     model = load_causal_LORA_model(model_name_or_path=model_path)
