@@ -851,20 +851,33 @@ def matrix_datainf_fn(__: torch.Tensor, val_grad: torch.Tensor, train_grad: torc
 
 from sklearn.svm import OneClassSVM
 def outlier_fn(int_view: torch.Tensor, val_grad: torch.Tensor, train_grad: torch.Tensor, *, 
-                detector_fn = OneClassSVM, full_val_size, **_) -> None:
+                detector_fn = OneClassSVM, full_val_size, autoregressive=True, **_) -> None:
 
     assert full_val_size == val_grad.shape[0], f"To fit grad region we need all validation gradients. Given {val_grad.shape[0]}, total {full_val_size}"
     val_grad_flat = val_grad.view(val_grad.shape[0], -1)
     val_grad_flat_tmp = val_grad_flat.float()
     val_grad_np = val_grad_flat_tmp.cpu().numpy()
-    detector = detector_fn()
-    detector.fit(val_grad_np)
     train_grad_flat = train_grad.view(train_grad.shape[0], -1)
     train_grad_flat_tmp = train_grad_flat.float()
     train_grad_np = train_grad_flat_tmp.cpu().numpy()
-    scores = detector.decision_function(train_grad_np)
-    scores_tmp = torch.tensor(scores, device=int_view.device, dtype=int_view.dtype)
-    int_view[:] = scores_tmp
+    # quick hack - in rereality we need to pass to influence the groups of validation samples that we consider to be coaligned in grad space intuitivelly same label
+    if autoregressive: # 10 groups of 
+        n_class = 10
+        n_val_per_class = 10
+        for i_class in range(n_class):
+            class_val_grad_np = val_grad_np[i_class * n_val_per_class:(i_class + 1) * n_val_per_class]
+            detector = detector_fn()
+            detector.fit(class_val_grad_np)
+            scores = detector.decision_function(train_grad_np)
+            scores_tmp = torch.tensor(scores, device=int_view.device, dtype=int_view.dtype)
+            int_view[i_class * n_val_per_class:(i_class + 1) * n_val_per_class] = scores_tmp            
+            pass
+    else:
+        detector = detector_fn()
+        detector.fit(val_grad_np)
+        scores = detector.decision_function(train_grad_np)
+        scores_tmp = torch.tensor(scores, device=int_view.device, dtype=int_view.dtype)
+        int_view[:] = scores_tmp
     del val_grad_flat, train_grad_flat, val_grad_flat_tmp, train_grad_flat_tmp, scores_tmp
     pass 
 
@@ -1301,7 +1314,7 @@ def infl_matrix_causal(task='sentense',
                                     module_name = module_name, infl_context = infl_contexts[method_name],
                                     train_shift=train_shift, val_shift=val_shift, 
                                     full_train_size=len(trainset), full_val_size=len(valset),
-                                    common_tokens=common_tokens)
+                                    common_tokens=common_tokens, autoregressive=True)
                 del train_grads
                 torch.cuda.empty_cache() 
             if val_grads is not None:
