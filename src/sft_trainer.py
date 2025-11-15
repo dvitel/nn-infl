@@ -1,22 +1,30 @@
 from dataclasses import dataclass, field
 import os
+from random import random
 from typing import Optional
-
+import numpy as np
 import torch
-from datasets import load_dataset, load_from_disk
+from datasets import load_from_disk
 from peft import LoraConfig
 from tqdm import tqdm
-from transformers import AutoModelForCausalLM, HfArgumentParser, TrainingArguments, DataCollatorWithPadding, BitsAndBytesConfig
-
+from transformers import AutoModelForCausalLM, HfArgumentParser
 from trl import SFTTrainer, SFTConfig
+from lora_model import load_tokenizer
 
-from exp import present_token_ids
-from torch.utils.data import DataLoader
+seed = int(os.environ.get("INFL_SEED", 0))
+cwd = os.environ.get("INFL_CWD", "./data/dev")
 
-from lora_model import build_causal_LORA_model, load_tokenizer
+print(f"Setting random seed {seed}")
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
+
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
 
 tqdm.pandas()
-torch.cuda.init()
 
 # Define and parse arguments.
 @dataclass
@@ -36,7 +44,7 @@ class ScriptArguments:
     gradient_accumulation_steps: Optional[int] = field(
         default=16, metadata={"help": "the number of gradient accumulation steps"}
     )
-    output_dir: Optional[str] = field(default="output", metadata={"help": "the output directory"})
+    m_prefix: Optional[str] = field(default="checkpoint", metadata={"help": "the output directory"})
     peft_lora_r: Optional[int] = field(default=8, metadata={"help": "the r parameter of the LoRA adapters"})
     peft_lora_alpha: Optional[int] = field(default=32, metadata={"help": "the alpha parameter of the LoRA adapters"})
     logging_steps: Optional[int] = field(default=1, metadata={"help": "the number of logging steps"})
@@ -99,9 +107,12 @@ peft_config = LoraConfig(task_type="CAUSAL_LM",
                             lora_alpha=script_args.peft_lora_alpha,                                 
                             lora_dropout=0.05)
 
+
+output_dir = os.path.join(cwd, f"{script_args.m_prefix}_{seed}")
+
 # Step 3: Define the training arguments
 training_args = SFTConfig(
-    output_dir=script_args.output_dir,
+    output_dir=output_dir,
     per_device_train_batch_size=script_args.batch_size,
     gradient_accumulation_steps=script_args.gradient_accumulation_steps,
     learning_rate=script_args.learning_rate,
@@ -132,7 +143,7 @@ trainer.train()
 
 # Step 6: Save the model
 # import pdb; pdb.set_trace()
-print(f"Saving to {script_args.output_dir}...")
+print(f"Saving to {output_dir}...")
 
-trainer.save_model(script_args.output_dir)
+trainer.save_model(output_dir)
 pass

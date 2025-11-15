@@ -18,6 +18,8 @@ from typing import Any, Dict, List, Optional, Union
 
 import datasets
 from kronfluence import Analyzer, FactorArguments, ScoreArguments, Task, prepare_model
+import pandas as pd
+from sklearn.metrics import roc_auc_score
 from tqdm import tqdm
 
 from postprocess import compute_ndr_metrics_table, cset_matrix_score, mean_matrix_score, min_matrix_score, rank_matrix_score, vote2_matrix_score, vote_matrix_score
@@ -848,7 +850,6 @@ def matrix_datainf_fn(__: torch.Tensor, val_grad: torch.Tensor, train_grad: torc
     pass
 
 from sklearn.svm import OneClassSVM
-# TODO: check batching and averaging on top. 
 def outlier_fn(int_view: torch.Tensor, val_grad: torch.Tensor, train_grad: torch.Tensor, *, 
                 detector_fn = OneClassSVM, full_val_size, **_) -> None:
 
@@ -866,15 +867,6 @@ def outlier_fn(int_view: torch.Tensor, val_grad: torch.Tensor, train_grad: torch
     int_view[:] = scores_tmp
     del val_grad_flat, train_grad_flat, val_grad_flat_tmp, train_grad_flat_tmp, scores_tmp
     pass 
-
-# TODO:
-def kronfl_fn(int_view: torch.Tensor, val_grad: torch.Tensor, train_grad: torch.Tensor, **_) -> None:
-    val_grad_flat = val_grad.view(val_grad.shape[0], -1)
-    train_grad_flat = train_grad.view(train_grad.shape[0], -1)
-    tmp_prods = torch.einsum('ik,jk->ij', val_grad_flat, train_grad_flat)
-    int_view[:] = tmp_prods
-    del tmp_prods, val_grad_flat, train_grad_flat
-    pass
 
 # def matrix_lissa_fn(int_view: torch.Tensor, val_grad: torch.Tensor, train_grad: torch.Tensor, lambda_const_param = 10, n_iteration=10, alpha_const=1.) -> None:
 #     n_train = train_grad.shape[0]
@@ -965,7 +957,6 @@ matrix_infl_methods = {
     'datainf': matrix_datainf_fn,
     'datainf0': partial(matrix_datainf_fn, use_orig_def=True),
     'outlier': outlier_fn,
-    'kronfl': kronfl_fn,
     # "datainf_we": partial(common_we, base_method_fn=matrix_datainf_fn),
     # "lissa": matrix_lissa_fn,
     # "lissa_we": partial(common_we, base_method_fn=matrix_lissa_fn),
@@ -1105,7 +1096,7 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
             with open(common_tokens_ds, 'wb') as file:
                 pickle.dump(common_tokens, file)
 
-    methods_without_we = ['datainf', 'datainf0', 'outlier', 'kronfl' ]
+    methods_without_we = ['datainf', 'datainf0', 'outlier' ]
     interaction_matrices = {method_name: {module_name: torch.zeros((len(valset), len(trainset)), dtype=torch.bfloat16, device=device)                                             
                                             for module_name, _, module_params in active_modules
                                             if ((method_name in methods_without_we) and (module_params.numel() < 100000)) or
@@ -1186,7 +1177,7 @@ def infl_matrix_causal(task='sentense',
 
     # todo check if reequires_grad is attached to embedding
 
-    model_path = f"{cwd}/{checkpoint}"
+    model_path = f"{cwd}/{checkpoint}_{seed}"
     print(f"Loading model {model_path}...")
     lora_model = load_causal_LORA_model(model_name_or_path=model_path)
     lora_model.to(device)
@@ -1643,6 +1634,71 @@ def scores(task = "qnli", infl_methods: str = 'datainf', agg_methods: str = 'mea
 #         pass
 #     pass
 
+def auc_recall(task = "sentense", infl_methods: str = 'hf,cos,datainf,outlier,kr-ekfac',
+                 i_prefix: str = 'i_ds', seeds: str = '0', 
+                 s_prefix: str = 'metrics'):
+    ''' For causal datasets compute these metrics for each layer and module, similar to layer_ndr '''
+    infl_methods = infl_methods.split(',')
+    seeds = [int(s) for s in seeds.split(',')]
+
+    n_train, n_val = 900, 100
+    n_sample_per_class = 90 
+    n_class = 10
+
+    def extract_module(name: str) -> str: # either lora A or B
+        if "lora_A" in name:
+            return "A"
+        elif "lora_B" in name:
+            return "B"
+        raise ValueError(f"Unknown module name {name}")
+    
+    def extract_layer(name:str) -> int: # numeric
+        name_parts = name.split('.')
+        loc_of_layer = name_parts.index("layers")
+        if loc_of_layer > 0 and loc_of_layer + 1 < len(name_parts):
+            layer = name_parts[loc_of_layer + 1]
+            return int(layer)
+        raise ValueError(f"Unknown layer {name}")
+
+    metrics = []
+    for seed in seeds:
+        for method in infl_methods:
+
+            infl_score_path = os.path.join(cwd, f"{i_prefix}_{method}_{task}_{seed}.pt")
+            infl_scores = torch.load(infl_score_path)
+
+            for module_name, module_scores in infl_scores.items():
+                module_type = extract_module(module_name)
+                layer = extract_layer(module_name)
+                aucs = []
+                recalls = []
+                for i in range(n_val):
+                    gt_array=np.zeros(n_train)
+                    gt_array[(i//n_class)*n_sample_per_class:((i//n_class)+1)*n_sample_per_class]=1
+                    cur_scores = module_scores[i].float().cpu().numpy()
+                    auc = roc_auc_score(gt_array, cur_scores)
+                    aucs.append(auc)
+
+                    sorted_ids = np.argsort(cur_scores)
+                    pick_most_infl = sorted_ids[-n_sample_per_class:] // n_sample_per_class
+                    correct_label = i // (n_val / n_class)
+                    recall = np.count_nonzero(pick_most_infl == correct_label)
+                    recalls.append(recall)
+
+                auc_mean = np.mean(aucs)
+                auc_std = np.std(aucs)
+
+                recall_mean = np.mean(recalls)
+                recall_std = np.std(recalls)
+
+                row = {"method": method, "module": module_type, "layer": layer, "seed": seed, "auc_mean": auc_mean, "auc_std": auc_std, "recall_mean": recall_mean, "recall_std": recall_std}
+                metrics.append(row)
+
+
+    metrics_df = pd.DataFrame(metrics)
+    output_dir = os.path.join(cwd, f"{s_prefix}_{task}.csv")
+    metrics_df.to_csv(output_dir)
+    pass
 
 def infl_noise(task = "qnli", infl_methods: str = 'datainf',
                  i_prefix: str = 'i_bl', m_prefix: str = 'm_bl',
