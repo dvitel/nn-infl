@@ -40,23 +40,3 @@ for run_id in {0..4}; do
 done
 
 echo 'Done influences'
-
-echo 'Computing kronfluence...'
-
-for run_id in {0..4}; do
-    echo "Seed $run_id"
-    HF_HOME=/blue/anshumanc.usf/nn-infl/.cache \
-    HF_TOKEN=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 \
-    INFL_SEED=$run_id \
-    INFL_CWD=$task_cwd \
-    python /home/dvitel.usf/nn-infl/src/exp.py kronfl \
-        --task $task \
-        --method ekfac \
-        --checkpoint m_ds \
-        --dataset $dataset \
-        --dataset-path /home/dvitel.usf/nn-infl/datasets \
-        --i-prefix i_ds
-done
-
-
-echo 'Done kronfluence'

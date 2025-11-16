@@ -34,7 +34,7 @@ for run_id in {0..4}; do
         --dataset-name /home/dvitel.usf/nn-infl/datasets/$dataset.hf \
         --m-prefix m_ds \
         --dataset-text-field text \
-        --learning-rate 1e-3 \
+        --learning-rate 5e-5 \
         --batch-size 128 \
         --num-train-epochs 10
 done

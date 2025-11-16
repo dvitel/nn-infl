@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --job-name=q-ds-score
+#SBATCH --job-name=m-ds-score
 #SBATCH --time=72:00:00
 #SBATCH --output ds-score-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/mistral

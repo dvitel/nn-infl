@@ -6,7 +6,7 @@ from matplotlib.colors import ListedColormap
 from matplotlib.ticker import FuncFormatter, MultipleLocator
 import pandas as pd
 import re
-from typing import Optional
+from typing import Literal, Optional
 from tabulate import tabulate
 
 import datasets
@@ -2308,6 +2308,118 @@ def process_ndr_table(base_path: str, tasks: list[str] = benchmark, output_ranks
     pass
 
 
+def draw_vote_k_ndr(base_path: str, tasks: list[str] = benchmark, 
+                        metric_name = 30, ndr_prefix = "ndr_bl", layers = None,
+                        best_group_by = None, custom_suffix = "",
+                        agg_method_names = None, infl_method_names = None): 
+    #NOTE: metric_name in ["f30", "auc_ndr"]):
+
+    dfs = []
+    for task in tasks:
+        df = pd.read_pickle(os.path.join(base_path, "ndr", f"{ndr_prefix}_{task}.pcl"))
+        df.drop(columns=["scores", "noise_mask"], inplace=True)
+        dfs.append(df)
+    df = pd.concat(dfs, ignore_index=False)
+
+    if infl_method_names is not None:
+        df = df.loc[df.index.get_level_values('infl').isin(infl_method_names)]
+        pass
+
+    if agg_method_names is not None:
+        df = df.loc[df.index.get_level_values('agg').isin(agg_method_names)]
+        pass
+
+    if layers is not None:
+        df = df.loc[df.index.get_level_values('layer').isin(layers)]
+        df = df.loc[df.index.get_level_values('module') == "all"]
+        pass
+
+
+    metric_df = df.reset_index().pivot(index=["infl", "agg", "layer", "module"], columns=["task", "run_id"], values=[metric_name])
+
+    ranks = metric_df.rank(axis = 0, ascending=False, method="average")
+    
+    suffix = ""
+    if output_ranks:
+        metric_df = ranks
+        suffix = "-rank"
+
+    metric_by_ds_mean = metric_df.groupby(level=1, axis=1).mean()
+    metric_by_ds_std = metric_df.groupby(level=1, axis=1).std()
+    metric_by_ds_std.columns = [c + "_std" for c in metric_by_ds_std.columns]
+    metric_by_ds = pd.merge(metric_by_ds_mean, metric_by_ds_std, left_index=True, right_index=True)
+    rank_columns = ["rank", "rank_std"]
+    metric_by_ds["rank"] = ranks.mean(axis=1)
+    metric_by_ds["rank_std"] = ranks.std(axis=1)
+
+    if best_group_by is not None:
+        best_idxs = metric_by_ds.groupby(level=best_group_by, axis=0)['rank'].idxmin()
+        metric_by_ds = metric_by_ds.loc[best_idxs]
+        metric_df = metric_df.loc[best_idxs]
+        ranks = metric_df.rank(axis = 0, ascending=False, method="average")
+        metric_by_ds["rank"] = ranks.mean(axis=1)
+        metric_by_ds["rank_std"] = ranks.std(axis=1)
+    
+    metric_by_ds = metric_by_ds.sort_values(by=['rank', 'rank_std'], ascending=[True, True])
+
+    metric_by_ds = metric_by_ds[[*[de for d in tasks for de in [d, d + "_std"]], *rank_columns]]
+    # metric_by_ds.to_csv(f"{base_path}/{metric_name}{suffix}-avg.csv")
+
+    values_to_highlight = metric_by_ds[tasks].to_numpy().max(axis=0)
+
+    rows = []
+    for row_id, row in enumerate(metric_by_ds.reset_index().to_dict(orient="records")):
+        new_row = {}
+        infl_method = row["infl"]
+        agg_method = row["agg"]
+        layer = row["layer"]
+        module = row["module"].replace("embed_tokens", "WE")
+        if with_row_id:
+            new_row["id"] = (row_id + 1)
+        new_row["infl"] = infl_method
+        new_row["agg"] = agg_method
+        find_layer = re.match(r"layers\s(\d+)\s", module)
+        if find_layer is not None:
+            layer = find_layer.group(1)
+            module = module.replace(find_layer.group(0), "")
+        new_row["layer"] = "WE" if module == "WE" else layer
+        new_row["module"] = module
+        for did, d in enumerate([*tasks, "rank"]):
+            should_highlight = False
+            if d == "rank":
+                m = round(row[d] * 10) / 10
+                m_std = round(row[d + "_std"] * 10) / 10
+            else:
+                should_highlight = row[d] == values_to_highlight[did]
+                m = round(row[d] * 1000) / 10
+                m_std = round(row[d + "_std"] * 1000) / 10
+            m = str(m).rstrip("0").rstrip(".").lstrip("0").replace("-0.", "-.")
+            m_std = str(m_std).rstrip("0").rstrip(".").lstrip("0")
+
+            if should_highlight:
+                if m_std == "":
+                    new_row[d] = f"\\textbf{{{m}}}"
+                else:
+                    new_row[d] = f"\\textbf{{{m}}} $\pm$ {m_std}"
+            else:
+                if m_std == "":
+                    new_row[d] = m
+                else:
+                    new_row[d] = f"{m} $\pm$ {m_std}"
+        rows.append(new_row)
+
+    with open(f"{base_path}/tables/ndr-{metric_name}{suffix}{custom_suffix}-avg.tex", "w") as stats_file:
+        s = tabulate(rows, headers = "keys", showindex=False, tablefmt="latex")
+        s = s.replace("\\textbackslash{}", "\\").replace("\\$", "$").replace("hf\_we\_topk\_10", "hf$^{10}_{we}$").replace("hf\_we\_", "hf$_{we}$").replace("\\_", "_").replace("\{", "{").replace("\}", "}").replace("\^{}", "^").replace("lllllllllll", "ll|ccccccccc").replace("rand", "\\hline rand")\
+            .replace("_10", "$^{10}$").replace("_50", "$^{50}$")\
+            .replace("commonset", "cset").replace("-20", "$^{20}$").replace("-30", "$^{30}$")\
+            .replace("commonsubset", "csset").replace("out_proj", "proj")\
+            .replace('self_attn ', '')\
+            .replace('v_proj', 'value').replace('q_proj', 'query')
+        print(s, file = stats_file)
+
+    pass
+
 def process_ndr_table2(base_path: str, tasks: list[str],
                         infl_methods = [ 'datainf', 'hf', 'cos'],
                         layers = [], agg_name = "mean",
@@ -4347,9 +4459,185 @@ def layer_ndr_metric_graphs(base_path: str, tasks=benchmark,
     plt.close(fig)
     pass
 
+def mean_confidence(x, confidence_level = 0.95):
+    mean = x.mean()
+    n = len(x)
+    df = n - 1
+    se = stats.sem(x)  # same as std/sqrt(n)
+
+    # t-based confidence interval
+    ci_low, ci_high = stats.t.interval(confidence_level, df, loc=mean, scale=se)    
+    return {
+        "mean": mean,
+        "ci_low": ci_low,
+        "ci_high": ci_high
+    }   
+
+def auc_recall_metric_graphs(metrics: list[str],
+                    metric_names: list[str],
+                    methods: list[str] = ["hf", "cos", "datainf", "outlier"],
+                    method_names: list[str] = ["HF", "Cosine", "DataInf", "Outlier"],
+                    metric: Literal["auc", "recall"] = "auc",
+                    modules: list[str] = ["A q", "B q", "A v", "B v"],
+                    module_names: list[str] = ["A q", "B q", "A v", "B v"],
+                    y_title = "Layer-wise AUC, \\%", 
+                    figsize = (8, 2),
+                    out_dir="."):
+
+    very_min = 100
+    very_max = 0
+
+    dfs = {}
+    for metric_file in metrics:
+        df = pd.read_csv(metric_file)
+        dfs[metric_file] = df
+
+    plt.ioff()
+    fig, axes = plt.subplots(len(methods), len(metrics), figsize=figsize)
+    ordered_handles = []
+    ordered_labels = []
+    for i, method in enumerate(methods):
+        method_name = method_names[i]
+        for j, metric_file in enumerate(metrics):
+            ax =  axes[i,j]
+            df = dfs[metric_file]
+            df = df[df["method"] == method]
+            metric_name = metric_names[j]
+            max_x = 0
+            for k, module in enumerate(modules):
+                module_name = module_names[k]            
+                module_df0 = df[df["module"] == module]
+                per_seed = module_df0.groupby(["seed", "layer"])[metric].mean().reset_index()
+                module_df = per_seed.groupby(["layer"])[metric].agg(mean_confidence).apply(pd.Series).reset_index()
+                local_x = module_df["layer"] + 1
+                max_x = max(max_x, local_x.max())
+                y_mean_values = module_df["mean"] * 100
+                y_min_values = module_df["ci_low"] * 100
+                y_max_values = module_df["ci_high"] * 100
+                very_min = min(very_min, y_min_values.min())
+                very_max = max(very_max, y_max_values.max())
+                ln = ax.plot(local_x, y_mean_values, label=module_name, linewidth=1)
+                if (i == 0) and (j == 0):
+                    ordered_handles.append(ln[0])
+                    ordered_labels.append(module_name)
+                ax.fill_between(local_x, y_min_values, y_max_values, color=ln[0].get_color(), alpha=0.2)
+            ax.set_xlim(0.5, max_x+0.5)
+  
+            x_values = np.arange(1, max_x + 1)
+            xticks = [x for x in x_values if x % 3 == 0 or x == 1]  # always show layer 1 + every 3rd
+            xlabels = [str(x) for x in xticks]
+
+            ax.set_xticks(xticks)
+            ax.set_xticklabels(xlabels, fontsize=7, verticalalignment='center')
+            ax.tick_params(axis='x', length=1)
+            ax.tick_params(axis='y', pad=0, length=1)
+            ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{int(value)}"))            
+            # ax.set_ylabel(y_title, fontsize=10, labelpad=0)
+            if j == 0:
+                ax.set_ylabel(method_name, fontsize=10, labelpad=0)
+            ylabels = [60,70,80,90]
+            ax.set_yticks(ylabels)
+            ax.set_yticklabels(ylabels, fontsize=7, verticalalignment='center')
+            ax.set_ylim(very_min, very_max)
+            # ax.set_xlabel("Layers", fontsize=8, labelpad=0)
+            if i == 0:
+                ax.set_title(metric_name, fontsize=10, pad=0)
+            for yhline in [60,70,80,90]:
+                ax.axhline(y=yhline, color="gray", linewidth=0.5, linestyle="--")
+            # if x_max_pos is not None:
+            #     ax.axvline(x=x_max_pos, color="gray", linewidth=0.5, linestyle="--")
+
+    fig.legend(ordered_handles, ordered_labels, loc='lower center', fontsize=8,
+                ncol=len(ordered_handles), borderaxespad = 0,  # Arrange all legend items in one row
+                bbox_to_anchor=(0.5, 0)  # Adjust position (centered below the grid)
+        )        
+    fig.tight_layout(w_pad=0, h_pad=0, pad=0, rect=[0, 0.03, 1, 1])
+    fig.savefig(os.path.join(out_dir, f"layers-{metric}-ds.pdf"))
+    plt.close(fig)
+    pass
+
 
 if __name__ == "__main__":
 
+    auc_recall_metric_graphs(
+        metrics=[
+            "./data/qwen/ds/metrics_sentense.csv",
+            "./data/qwen/ds/metrics_math.csv",
+            "./data/qwen/ds/metrics_mathR.csv"
+        ],
+        metric_names=[
+            "Sentence AUC vs Layer, \\%", "Math AUC vs Layer, \\%", "Math w. Reason AUC vs Layer, \\%"
+        ],
+        methods=['hf','cos','datainf','outlier','kr-ekfac'],
+        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC"],
+        metric='auc',
+        modules=['A q', 'B q', 'A v', 'B v'],
+        module_names=["Query A", "Query B", "Value A", "Value B"],
+        y_title="Layer-wise AUC, \\%",
+        figsize=(8, 7),
+        out_dir="./data/qwen/ds"
+    )
+    pass
+
+    auc_recall_metric_graphs(
+        metrics=[
+            "./data/qwen/ds/metrics_sentense.csv",
+            "./data/qwen/ds/metrics_math.csv",
+            "./data/qwen/ds/metrics_mathR.csv"
+        ],
+        metric_names=[
+            "Sentence Recall vs Layer, \\%", "Math Recall vs Layer, \\%", "Math w. Reason Recall vs Layer, \\%"
+        ],
+        methods=['hf','cos','datainf','outlier','kr-ekfac'],
+        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC"],
+        metric='recall',
+        modules=['A q', 'B q', 'A v', 'B v'],
+        module_names=["Query A", "Query B", "Value A", "Value B"],
+        y_title="Layer-wise Recall, \\%",
+        figsize=(8, 7),
+        out_dir="./data/qwen/ds"
+    )
+    pass
+
+    auc_recall_metric_graphs(
+        metrics=[
+            "./data/mistral/ds/metrics_sentense.csv",
+            "./data/mistral/ds/metrics_math.csv",
+            "./data/mistral/ds/metrics_mathR.csv"
+        ],
+        metric_names=[
+            "Sentence AUC vs Layer, \\%", "Math AUC vs Layer, \\%", "Math w. Reason AUC vs Layer, \\%"
+        ],
+        methods=['hf','cos','datainf','outlier','kr-ekfac'],
+        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC"],
+        metric='auc',
+        modules=['A q', 'B q', 'A v', 'B v'],
+        module_names=["Query A", "Query B", "Value A", "Value B"],
+        y_title="Layer-wise AUC, \\%",
+        figsize=(8, 7),
+        out_dir="./data/mistral/ds"
+    )
+    pass
+
+    auc_recall_metric_graphs(
+        metrics=[
+            "./data/mistral/ds/metrics_sentense.csv",
+            "./data/mistral/ds/metrics_math.csv",
+            "./data/mistral/ds/metrics_mathR.csv"
+        ],
+        metric_names=[
+            "Sentence Recall vs Layer, \\%", "Math Recall vs Layer, \\%", "Math w. Reason Recall vs Layer, \\%"
+        ],
+        methods=['hf','cos','datainf','outlier','kr-ekfac'],
+        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC"],
+        metric='recall',
+        modules=['A q', 'B q', 'A v', 'B v'],
+        module_names=["Query A", "Query B", "Value A", "Value B"],
+        y_title="Layer-wise Recall, \\%",
+        figsize=(8, 7),
+        out_dir="./data/mistral/ds"
+    )
+    pass
     
     # ndr_test()
     # pass
@@ -4490,9 +4778,11 @@ if __name__ == "__main__":
     #                             layers=selected_layers, 
     #                             infl_method_names=infl_ms,
     #                             agg_method_names=[am, f'{am}-c'], custom_suffix=f"-{infl_ms[0]}-{am}-s")
-    process_ndr_table(base_path, tasks=dss, with_row_id=False, custom_suffix = "-vote-k", 
-                      best_group_by=["infl", "agg"], layers=selected_layers, ndr_prefix="ndr_vote_k",
-                      agg_method_names=agg_method_names)
+    # draw_vote_k_ndr()
+    # process_ndr_table(base_path, tasks=dss, with_row_id=False, custom_suffix = "-vote-k", 
+    #                   best_group_by=["infl", "agg"], layers=selected_layers, ndr_prefix="ndr_vote_k",
+    #                   agg_method_names=agg_method_names)
+    pass
     # process_ndr_table(base_path, tasks=benchmark, with_row_id=False,
     #                     layers=selected_layers, agg_method_names=agg_method_names)
     # process_ndr_table(base_path, tasks=benchmark, with_row_id=False, custom_suffix = "-hf",
