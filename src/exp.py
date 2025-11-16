@@ -1690,29 +1690,35 @@ def auc_recall(task = "sentense", infl_methods: str = 'hf,cos,datainf,outlier,kr
             for module_name, module_scores in infl_scores.items():
                 module_type = f"{extract_module(module_name)} {extract_qv(module_name)}"
                 layer = extract_layer(module_name)
-                aucs = []
-                recalls = []
+                # aucs = []
+                # recalls = []
                 for i in range(n_val):
                     gt_array=np.zeros(n_train)
                     gt_array[(i//n_class)*n_sample_per_class:((i//n_class)+1)*n_sample_per_class]=1
                     cur_scores = module_scores[i].float().cpu().numpy()
                     auc = roc_auc_score(gt_array, cur_scores)
-                    aucs.append(auc)
+                    # aucs.append(auc)
 
                     sorted_ids = np.argsort(cur_scores)
                     pick_most_infl = sorted_ids[-n_sample_per_class:] // n_sample_per_class
                     correct_label = i // (n_val / n_class)
                     recall = np.count_nonzero(pick_most_infl == correct_label) / float(n_sample_per_class)
-                    recalls.append(recall)
+                    # recalls.append(recall)
 
-                auc_mean = np.mean(aucs)
-                auc_std = np.std(aucs)
+                    row = {"method": method, 
+                           "module": module_type, 
+                           "layer": layer, 
+                           "seed": seed, 
+                           "val_index": i,
+                           "auc": auc,
+                           "recall": recall}
+                    metrics.append(row)
+                # auc_mean = np.mean(aucs)
+                # auc_std = np.std(aucs)
 
-                recall_mean = np.mean(recalls)
-                recall_std = np.std(recalls)
+                # recall_mean = np.mean(recalls)
+                # recall_std = np.std(recalls)
 
-                row = {"method": method, "module": module_type, "layer": layer, "seed": seed, "auc_mean": auc_mean, "auc_std": auc_std, "recall_mean": recall_mean, "recall_std": recall_std, "full_module": module_name}
-                metrics.append(row)
 
     metrics_df = pd.DataFrame(metrics)
     output_dir = os.path.join(cwd, f"{s_prefix}_{task}.csv")
