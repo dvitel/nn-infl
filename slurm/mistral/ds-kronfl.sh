@@ -20,6 +20,8 @@ datasets=("grammars" "math_without_reason" "math_with_reason")
 task=${tasks[$SLURM_ARRAY_TASK_ID]}
 dataset=${datasets[$SLURM_ARRAY_TASK_ID]}
 
+task_cwd=/blue/anshumanc.usf/nn-infl/mistral/$task
+
 echo 'Computing kronfluence...'
 
 for run_id in {0..4}; do
