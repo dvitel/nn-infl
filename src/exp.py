@@ -1467,8 +1467,8 @@ def repsim(task='sentense',
             dataset_path:str=".",
             device='cuda',
             i_prefix='i_ds',
-            train_batch_size: int = 64,
-            val_batch_size: int = 64):
+            train_batch_size: int = 128,
+            val_batch_size: int = 128):
 
     model_path = f"{cwd}/{checkpoint}_{seed}"
     print(f"Loading model {model_path}...")
