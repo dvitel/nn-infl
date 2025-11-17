@@ -548,7 +548,7 @@ def vote_matrix_score(rank_matrix: torch.Tensor, *, chunk_size = 10000, filter_p
         votes_view[:] = torch.sum(ranks_view >= filter_threshold, dim=(-2, -1), dtype=torch.float)
     return votes
 
-def vote2_matrix_score(rank_matrix: torch.Tensor, *, chunk_size = 10000, filter_perc = 0.5, **_) -> torch.Tensor:
+def vote2_matrix_score(rank_matrix: torch.Tensor, *, chunk_size = 10000, filter_perc = 0.2, **_) -> torch.Tensor:
     # total_rank_matrix = rank_matrix.view(rank_matrix.shape[0], -1)
     votes = torch.zeros(rank_matrix.shape[0], dtype = torch.float, device = rank_matrix.device)
     filter_threshold = round(filter_perc * rank_matrix.shape[0])
@@ -1973,18 +1973,18 @@ agg_methods = {
                           use_correct = True),                                                    
 
     "rmin": partial(rank_matrix_score, rank_score_fn = min_matrix_score),
-    "rmin-c": partial(rank_matrix_score, rank_score_fn = min_matrix_score, use_correct = True),
+    # "rmin-c": partial(rank_matrix_score, rank_score_fn = min_matrix_score, use_correct = True),
 
 
-    # "median": median_matrix_score,
-    # "maj": maj_matrix_score,
-    "cset": cset_matrix_score,
-    "cset-c": partial(cset_matrix_score, use_correct = True),
+    "median": median_matrix_score,
+    "maj": maj_matrix_score,
+    # "cset": cset_matrix_score,
+    # "cset-c": partial(cset_matrix_score, use_correct = True),
     # "cset-2": partial(cset_matrix_score, both_sides = True),
     # "min": mean_min_matrix_score,
     # "min-20": partial(mean_min_matrix_score, min_ratio=0.2),
     
-    # "cmean": confident_matrix_score,
+    "cmean": confident_matrix_score,
     
     # "crank": partial(confident_matrix_score, base_method_fn=rank_matrix_score),
     # # "ccset": partial(confident_matrix_score, base_method_fn=commonset_matrix_score),
@@ -1995,18 +1995,18 @@ agg_methods = {
     # # "csmi": partial(csmi_matrix_score, vote_ratio = 0.5, descending = False)
 
 
-    # "mean_10": partial(mean_matrix_score, trim_ratio=0.1),
-    # "mean_50": partial(mean_matrix_score, trim_ratio=0.5),
-    # "commonset1": partial(commonset_matrix_score, vote_ratio = 0.1),
-    # "commonset-80": partial(commonset_matrix_score, vote_ratio = 0.8),
-    # "commonset3": partial(commonset_matrix_score, vote_ratio = 0.3),
-    # "commonset4": partial(commonset_matrix_score, vote_ratio = 0.4),
-    # "commonsubset1": partial(commonsubset_matrix_score, vote_ratio = 0.1, descending = False),
-    # "commonsubset2": partial(commonsubset_matrix_score, vote_ratio = 0.2, descending = False),
-    # "commonsubset3": partial(commonsubset_matrix_score, vote_ratio = 0.3, descending = False),
-    # "commonsubset-60": partial(commonsubset_matrix_score, vote_ratio = 0.6, descending = False),
-    # "commonsubset-40r": partial(commonsubset_matrix_score, vote_ratio = 0.4, same_class = True, descending = True),
-    # "commonsubset-40rr": partial(commonsubset_matrix_score, vote_ratio = 0.4, same_class = True, descending = False),
+    "mean_10": partial(mean_matrix_score, trim_ratio=0.1),
+    "mean_50": partial(mean_matrix_score, trim_ratio=0.5),
+    "commonset-10": partial(commonset_matrix_score, vote_ratio = 0.1),
+    "commonset-30": partial(commonset_matrix_score, vote_ratio = 0.3),
+    "commonset-40": partial(commonset_matrix_score, vote_ratio = 0.4),
+    "commonset-80": partial(commonset_matrix_score, vote_ratio = 0.8),
+    "commonsubset-10": partial(commonsubset_matrix_score, vote_ratio = 0.1, descending = False),
+    "commonsubset-30": partial(commonsubset_matrix_score, vote_ratio = 0.3, descending = False),
+    "commonsubset-40": partial(commonsubset_matrix_score, vote_ratio = 0.4, descending = False),
+    "commonsubset-80": partial(commonsubset_matrix_score, vote_ratio = 0.8, descending = False),
+    "commonsubset-40r": partial(commonsubset_matrix_score, vote_ratio = 0.4, same_class = True, descending = True),
+    "commonsubset-40rr": partial(commonsubset_matrix_score, vote_ratio = 0.4, same_class = True, descending = False),
     # "silhouette": cluster_matrix_score
 }
 
@@ -4550,6 +4550,57 @@ def auc_recall_metric_graphs(metrics: list[str],
     ordered_handles = []
     ordered_labels = []
     repsim_handle_init = []
+    def default_setting(ax, method_name, metric_name, i, j, max_x):
+        ax.set_xlim(0.5, max_x+0.5)
+
+        x_values = np.arange(1, max_x + 1)
+        xticks = [x for x in x_values if x % 3 == 0 or x == 1]  # always show layer 1 + every 3rd
+        xlabels = [str(x) for x in xticks]
+
+        ax.set_xticks(xticks)
+        ax.set_xticklabels(xlabels, fontsize=7, verticalalignment='center')
+        ax.tick_params(axis='x', length=1)
+        ax.tick_params(axis='y', pad=0, length=1)
+        ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{int(value)}"))            
+        # ax.set_ylabel(y_title, fontsize=10, labelpad=0)
+        if j == 0:
+            ax.set_ylabel(method_name, fontsize=10, labelpad=0)
+        ylabels = [60,70,80,90]
+        ax.set_yticks(ylabels)
+        ax.set_yticklabels(ylabels, fontsize=7, verticalalignment='center')
+        ax.set_ylim(very_min, very_max)
+        # ax.set_xlabel("Layers", fontsize=8, labelpad=0)
+        if i == 0:
+            ax.set_title(metric_name, fontsize=10, pad=0)
+        for yhline in [60,70,80,90]:
+            ax.axhline(y=yhline, color="gray", linewidth=0.5, linestyle="--")
+        # if x_max_pos is not None:
+        #     ax.axvline(x=x_max_pos, color="gray", linewidth=0.5, linestyle="--")
+        ax.set_xlim(0.5, max_x+0.5)
+
+        x_values = np.arange(1, max_x + 1)
+        xticks = [x for x in x_values if x % 3 == 0 or x == 1]  # always show layer 1 + every 3rd
+        xlabels = [str(x) for x in xticks]
+
+        ax.set_xticks(xticks)
+        ax.set_xticklabels(xlabels, fontsize=7, verticalalignment='center')
+        ax.tick_params(axis='x', length=1)
+        ax.tick_params(axis='y', pad=0, length=1)
+        ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{int(value)}"))            
+        # ax.set_ylabel(y_title, fontsize=10, labelpad=0)
+        if j == 0:
+            ax.set_ylabel(method_name, fontsize=10, labelpad=0)
+        ylabels = [60,70,80,90]
+        ax.set_yticks(ylabels)
+        ax.set_yticklabels(ylabels, fontsize=7, verticalalignment='center')
+        ax.set_ylim(very_min, very_max)
+        # ax.set_xlabel("Layers", fontsize=8, labelpad=0)
+        if i == 0:
+            ax.set_title(metric_name, fontsize=10, pad=0)
+        for yhline in [60,70,80,90]:
+            ax.axhline(y=yhline, color="gray", linewidth=0.5, linestyle="--")
+        # if x_max_pos is not None:
+        #     ax.axvline(x=x_max_pos, color="gray", linewidth=0.5, linestyle="--")
     for i, method in enumerate(methods):
         method_name = method_names[i]
         if method != "repsim":        
@@ -4576,6 +4627,7 @@ def auc_recall_metric_graphs(metrics: list[str],
                         ordered_handles.append(ln[0])
                         ordered_labels.append(module_name)
                     ax.fill_between(local_x, y_min_values, y_max_values, color=ln[0].get_color(), alpha=0.2)
+                    default_setting(ax, method_name, metric_name, i, j, max_x)
         else:
             submethods = ["repsim-last", "repsim-mean"]
             submethod_names = ["RepSim Last", "RepSim Mean"]
@@ -4614,56 +4666,8 @@ def auc_recall_metric_graphs(metrics: list[str],
                         ordered_labels.append(submethod_name)
                         repsim_handle_init.append(submethod)
                     ax.fill_between(local_x, y_min_values, y_max_values, color=ln[0].get_color(), alpha=0.2)
-        ax.set_xlim(0.5, max_x+0.5)
+                    default_setting(ax, method_name, metric_name, i, j, max_x)
 
-        x_values = np.arange(1, max_x + 1)
-        xticks = [x for x in x_values if x % 3 == 0 or x == 1]  # always show layer 1 + every 3rd
-        xlabels = [str(x) for x in xticks]
-
-        ax.set_xticks(xticks)
-        ax.set_xticklabels(xlabels, fontsize=7, verticalalignment='center')
-        ax.tick_params(axis='x', length=1)
-        ax.tick_params(axis='y', pad=0, length=1)
-        ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{int(value)}"))            
-        # ax.set_ylabel(y_title, fontsize=10, labelpad=0)
-        if j == 0:
-            ax.set_ylabel(method_name, fontsize=10, labelpad=0)
-        ylabels = [60,70,80,90]
-        ax.set_yticks(ylabels)
-        ax.set_yticklabels(ylabels, fontsize=7, verticalalignment='center')
-        ax.set_ylim(very_min, very_max)
-        # ax.set_xlabel("Layers", fontsize=8, labelpad=0)
-        if i == 0:
-            ax.set_title(metric_name, fontsize=10, pad=0)
-        for yhline in [60,70,80,90]:
-            ax.axhline(y=yhline, color="gray", linewidth=0.5, linestyle="--")
-        # if x_max_pos is not None:
-        #     ax.axvline(x=x_max_pos, color="gray", linewidth=0.5, linestyle="--")
-        ax.set_xlim(0.5, max_x+0.5)
-
-        x_values = np.arange(1, max_x + 1)
-        xticks = [x for x in x_values if x % 3 == 0 or x == 1]  # always show layer 1 + every 3rd
-        xlabels = [str(x) for x in xticks]
-
-        ax.set_xticks(xticks)
-        ax.set_xticklabels(xlabels, fontsize=7, verticalalignment='center')
-        ax.tick_params(axis='x', length=1)
-        ax.tick_params(axis='y', pad=0, length=1)
-        ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{int(value)}"))            
-        # ax.set_ylabel(y_title, fontsize=10, labelpad=0)
-        if j == 0:
-            ax.set_ylabel(method_name, fontsize=10, labelpad=0)
-        ylabels = [60,70,80,90]
-        ax.set_yticks(ylabels)
-        ax.set_yticklabels(ylabels, fontsize=7, verticalalignment='center')
-        ax.set_ylim(very_min, very_max)
-        # ax.set_xlabel("Layers", fontsize=8, labelpad=0)
-        if i == 0:
-            ax.set_title(metric_name, fontsize=10, pad=0)
-        for yhline in [60,70,80,90]:
-            ax.axhline(y=yhline, color="gray", linewidth=0.5, linestyle="--")
-        # if x_max_pos is not None:
-        #     ax.axvline(x=x_max_pos, color="gray", linewidth=0.5, linestyle="--")
 
     fig.legend(ordered_handles, ordered_labels, loc='lower center', fontsize=8,
                 ncol=len(ordered_handles), borderaxespad = 0,  # Arrange all legend items in one row
@@ -4677,41 +4681,41 @@ def auc_recall_metric_graphs(metrics: list[str],
 
 if __name__ == "__main__":
 
-    auc_recall_metric_graphs(
-        metrics=[
-            "./data/dev/qwen/sentense/metrics_sentense.csv",
-        ],
-        metric_names=[
-            "Sentence AUC vs Layer, \\%", "Math AUC vs Layer, \\%", "Math w. Reason AUC vs Layer, \\%"
-        ],
-        methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
-        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", 'RepSim'],
-        metric='auc',
-        modules=['A q', 'B q', 'A v', 'B v'],
-        module_names=["Query A", "Query B", "Value A", "Value B"],
-        y_title="Layer-wise AUC, \\%",
-        figsize=(8, 7),
-        out_dir="./data/dev/qwen/sentense"
-    )
-    pass
+    # auc_recall_metric_graphs(
+    #     metrics=[
+    #         "./data/dev/qwen/sentense/metrics_sentense.csv",
+    #     ],
+    #     metric_names=[
+    #         "Sentence AUC vs Layer, \\%", "Math AUC vs Layer, \\%", "Math w. Reason AUC vs Layer, \\%"
+    #     ],
+    #     methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
+    #     method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", 'RepSim'],
+    #     metric='auc',
+    #     modules=['A q', 'B q', 'A v', 'B v'],
+    #     module_names=["Query A", "Query B", "Value A", "Value B"],
+    #     y_title="Layer-wise AUC, \\%",
+    #     figsize=(8, 7),
+    #     out_dir="./data/dev/qwen/sentense"
+    # )
+    # pass
 
-    auc_recall_metric_graphs(
-        metrics=[
-            "./data/dev/qwen/sentense/metrics_sentense.csv",
-        ],
-        metric_names=[
-            "Sentence Recall vs Layer, \\%", "Math Recall vs Layer, \\%", "Math w. Reason Recall vs Layer, \\%"
-        ],
-        methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
-        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", 'RepSim'],
-        metric='recall',
-        modules=['A q', 'B q', 'A v', 'B v'],
-        module_names=["Query A", "Query B", "Value A", "Value B"],
-        y_title="Layer-wise Recall, \\%",
-        figsize=(8, 7),
-        out_dir="./data/dev/qwen/sentense"
-    )
-    pass
+    # auc_recall_metric_graphs(
+    #     metrics=[
+    #         "./data/dev/qwen/sentense/metrics_sentense.csv",
+    #     ],
+    #     metric_names=[
+    #         "Sentence Recall vs Layer, \\%", "Math Recall vs Layer, \\%", "Math w. Reason Recall vs Layer, \\%"
+    #     ],
+    #     methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
+    #     method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", 'RepSim'],
+    #     metric='recall',
+    #     modules=['A q', 'B q', 'A v', 'B v'],
+    #     module_names=["Query A", "Query B", "Value A", "Value B"],
+    #     y_title="Layer-wise Recall, \\%",
+    #     figsize=(8, 7),
+    #     out_dir="./data/dev/qwen/sentense"
+    # )
+    # pass
 
 
     auc_recall_metric_graphs(
@@ -4723,8 +4727,8 @@ if __name__ == "__main__":
         metric_names=[
             "Sentence AUC vs Layer, \\%", "Math AUC vs Layer, \\%", "Math w. Reason AUC vs Layer, \\%"
         ],
-        methods=['hf','cos','datainf','outlier','kr-ekfac'],
-        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC"],
+        methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
+        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
         metric='auc',
         modules=['A q', 'B q', 'A v', 'B v'],
         module_names=["Query A", "Query B", "Value A", "Value B"],
@@ -4743,8 +4747,8 @@ if __name__ == "__main__":
         metric_names=[
             "Sentence Recall vs Layer, \\%", "Math Recall vs Layer, \\%", "Math w. Reason Recall vs Layer, \\%"
         ],
-        methods=['hf','cos','datainf','outlier','kr-ekfac'],
-        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC"],
+        methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
+        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
         metric='recall',
         modules=['A q', 'B q', 'A v', 'B v'],
         module_names=["Query A", "Query B", "Value A", "Value B"],
@@ -4763,8 +4767,8 @@ if __name__ == "__main__":
         metric_names=[
             "Sentence AUC vs Layer, \\%", "Math AUC vs Layer, \\%", "Math w. Reason AUC vs Layer, \\%"
         ],
-        methods=['hf','cos','datainf','outlier','kr-ekfac'],
-        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC"],
+        methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
+        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
         metric='auc',
         modules=['A q', 'B q', 'A v', 'B v'],
         module_names=["Query A", "Query B", "Value A", "Value B"],
@@ -4783,8 +4787,8 @@ if __name__ == "__main__":
         metric_names=[
             "Sentence Recall vs Layer, \\%", "Math Recall vs Layer, \\%", "Math w. Reason Recall vs Layer, \\%"
         ],
-        methods=['hf','cos','datainf','outlier','kr-ekfac'],
-        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC"],
+        methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
+        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
         metric='recall',
         modules=['A q', 'B q', 'A v', 'B v'],
         module_names=["Query A", "Query B", "Value A", "Value B"],

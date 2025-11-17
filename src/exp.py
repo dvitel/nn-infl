@@ -1619,7 +1619,7 @@ def ndr(task = "qnli", infl_methods: str = 'datainf', agg_methods: str = 'mean',
                                     include_total = include_total, levels = levels,
                                     m_prefix = m_prefix, i_prefix=i_prefix,
                                     ndr_prefix=ndr_prefix, device = device,
-                                    noise_hist_bins = hist_bins)
+                                    noise_hist_bins = None if hist_bins == 0 else hist_bins)
     pass
 
 from postprocess import agg_methods as agg_method_fns
