@@ -747,20 +747,6 @@ def set_grad_values(all_grads: list[torch.Tensor], model: torch.nn.Module, activ
             g[sampleId] = p.grad
     model.zero_grad()
 
-def set_activ_values(model: torch.nn.Module, dataloader: DataLoader, device = "cuda"):     
-    with torch.no_grad():
-        for sampleId, batch in enumerate(dataloader):
-            # model.zero_grad()
-            # if autoregressive: # labels are inputs - teacher forcing
-            #     batch["labels"] = batch["input_ids"]
-            batch.to(device)
-            outputs = model(**batch)
-            # loss = outputs.loss
-            # loss.backward()
-            # for g, p in zip(all_grads, active_params):
-            #     g[sampleId] = p.grad
-    # model.zero_grad()    
-
 # here we assume that positive 'infl' is good and negative is 'bad'
 
 def matrix_hf_fn(int_view: torch.Tensor, val_grad: torch.Tensor, train_grad: torch.Tensor, **_) -> None:
@@ -1481,8 +1467,8 @@ def repsim(task='sentense',
             dataset_path:str=".",
             device='cuda',
             i_prefix='i_ds',
-            train_batch_size: int = 128,
-            val_batch_size: int = 128):
+            train_batch_size: int = 64,
+            val_batch_size: int = 64):
 
     model_path = f"{cwd}/{checkpoint}_{seed}"
     print(f"Loading model {model_path}...")
@@ -1509,16 +1495,26 @@ def repsim(task='sentense',
 
     # Storage for activations
     activations = {}
+    cur_attention_mask = None
     
     if method == "last":
         def make_hook(layer_id):
             def hook(module, inp, out):
-                activations[layer_id] = out[:,-1,:].detach()
+                attn_mask = cur_attention_mask
+                last_idx = attn_mask.sum(dim=1) - 1 
+                batch_indices = torch.arange(out.size(0), device=out.device)
+                pooled = out[batch_indices, last_idx, :]
+                activations[layer_id] = pooled.detach()   
+                del last_idx, batch_indices, pooled             
             return hook
     elif method == "mean":
         def make_hook(layer_id):
             def hook(module, inp, out):
-                activations[layer_id] = out.mean(dim=1).detach()
+                attn_mask = cur_attention_mask
+                masked_out = out * attn_mask.unsqueeze(-1)
+                pooled = masked_out.sum(dim=1) / attn_mask.sum(dim=1).unsqueeze(-1)              
+                activations[layer_id] = pooled.detach()
+                del masked_out, pooled
             return hook
     else:
         raise ValueError(f"Unknown repsim method {method}")
@@ -1548,14 +1544,22 @@ def repsim(task='sentense',
                             shuffle=False, 
                             collate_fn=collator,
                             batch_size=val_batch_size)
-            set_activ_values(lora_model, val_dataloader, device=device)
+            with torch.no_grad():
+                for batch in val_dataloader:
+                    batch.to(device)
+                    cur_attention_mask = batch['attention_mask']
+                    outputs = lora_model(**batch)            
             val_activations = dict(activations)
             activations.clear()
         train_dataloader = DataLoader(cur_train_dataset,
                             shuffle=False, 
                             collate_fn=collator,
                             batch_size=train_batch_size)
-        set_activ_values(lora_model, train_dataloader, device=device)
+        with torch.no_grad():
+            for batch in train_dataloader:
+                batch.to(device)
+                cur_attention_mask = batch['attention_mask']
+                outputs = lora_model(**batch)                 
         train_activations = dict(activations)
         activations.clear()
         

@@ -4546,10 +4546,10 @@ def auc_recall_metric_graphs(metrics: list[str],
     # if "repsim" in methods:
     #     include_repsim = True
     plt.ioff()
-    fig, axes = plt.subplots(len(methods), len(metrics), figsize=figsize)
+    fig, axes = plt.subplots(len(methods), len(metrics), figsize=figsize, squeeze=False)
     ordered_handles = []
     ordered_labels = []
-    repsim_handle_init = False
+    repsim_handle_init = []
     for i, method in enumerate(methods):
         method_name = method_names[i]
         if method != "repsim":        
@@ -4586,10 +4586,10 @@ def auc_recall_metric_graphs(metrics: list[str],
                 max_x = 0
                 for k, submethod in enumerate(submethods):
                     submethod_name = submethod_names[k]          
-                    if submethod_name == "repsim-last":
+                    if submethod == "repsim-last":
                         color = "black"
                         linestyle = "-"
-                    elif submethod_name == "repsim-mean":
+                    elif submethod == "repsim-mean":
                         color = "black"
                         linestyle = "--"
                     else:
@@ -4609,10 +4609,10 @@ def auc_recall_metric_graphs(metrics: list[str],
                                 color=color,
                                 linestyle=linestyle                                 
                                  )
-                    if not repsim_handle_init:
+                    if submethod not in repsim_handle_init:
                         ordered_handles.append(ln[0])
                         ordered_labels.append(submethod_name)
-                        repsim_handle_init = True
+                        repsim_handle_init.append(submethod)
                     ax.fill_between(local_x, y_min_values, y_max_values, color=ln[0].get_color(), alpha=0.2)
         ax.set_xlim(0.5, max_x+0.5)
 
@@ -4676,6 +4676,43 @@ def auc_recall_metric_graphs(metrics: list[str],
 
 
 if __name__ == "__main__":
+
+    auc_recall_metric_graphs(
+        metrics=[
+            "./data/dev/qwen/sentense/metrics_sentense.csv",
+        ],
+        metric_names=[
+            "Sentence AUC vs Layer, \\%", "Math AUC vs Layer, \\%", "Math w. Reason AUC vs Layer, \\%"
+        ],
+        methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
+        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", 'RepSim'],
+        metric='auc',
+        modules=['A q', 'B q', 'A v', 'B v'],
+        module_names=["Query A", "Query B", "Value A", "Value B"],
+        y_title="Layer-wise AUC, \\%",
+        figsize=(8, 7),
+        out_dir="./data/dev/qwen/sentense"
+    )
+    pass
+
+    auc_recall_metric_graphs(
+        metrics=[
+            "./data/dev/qwen/sentense/metrics_sentense.csv",
+        ],
+        metric_names=[
+            "Sentence Recall vs Layer, \\%", "Math Recall vs Layer, \\%", "Math w. Reason Recall vs Layer, \\%"
+        ],
+        methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
+        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", 'RepSim'],
+        metric='recall',
+        modules=['A q', 'B q', 'A v', 'B v'],
+        module_names=["Query A", "Query B", "Value A", "Value B"],
+        y_title="Layer-wise Recall, \\%",
+        figsize=(8, 7),
+        out_dir="./data/dev/qwen/sentense"
+    )
+    pass
+
 
     auc_recall_metric_graphs(
         metrics=[
