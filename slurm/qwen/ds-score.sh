@@ -28,7 +28,7 @@ INFL_SEED=0 \
 INFL_CWD=$task_cwd \
 python /home/dvitel.usf/nn-infl/src/exp.py auc-recall \
     --task $task \
-    --infl-methods hf,cos,datainf,outlier \
+    --infl-methods hf,cos,datainf,outlier,kr-ekfac,repsim-last,repsim-mean \
     --i-prefix i_ds \
     --seeds 0,1,2,3,4 \
     --s-prefix metrics

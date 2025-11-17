@@ -1803,8 +1803,12 @@ def auc_recall(task = "sentense", infl_methods: str = 'hf,cos,datainf,outlier,kr
             infl_scores = torch.load(infl_score_path)
 
             for module_name, module_scores in infl_scores.items():
-                module_type = f"{extract_module(module_name)} {extract_qv(module_name)}"
-                layer = extract_layer(module_name)
+                if method.startswith("repsim"):
+                    module_type = ''
+                    layer = int(module_name)
+                else:
+                    module_type = f"{extract_module(module_name)} {extract_qv(module_name)}"
+                    layer = extract_layer(module_name)
                 # aucs = []
                 # recalls = []
                 for i in range(n_val):

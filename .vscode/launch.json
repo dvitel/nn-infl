@@ -405,7 +405,7 @@
             "args": [
                 "auc-recall", 
                 "--task=sentense",
-                "--infl-methods=hf,cos,datainf,outlier,kr-ekfac", 
+                "--infl-methods=hf,cos,datainf,outlier,kr-ekfac,repsim-last,repsim-mean", 
                 "--i-prefix=i_s", 
                 "--seeds=42",
                 "--s-prefix=metrics"

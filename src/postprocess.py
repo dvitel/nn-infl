@@ -4542,60 +4542,128 @@ def auc_recall_metric_graphs(metrics: list[str],
         df = pd.read_csv(metric_file)
         dfs[metric_file] = df
 
+    # include_repsim = False
+    # if "repsim" in methods:
+    #     include_repsim = True
     plt.ioff()
     fig, axes = plt.subplots(len(methods), len(metrics), figsize=figsize)
     ordered_handles = []
     ordered_labels = []
+    repsim_handle_init = False
     for i, method in enumerate(methods):
         method_name = method_names[i]
-        for j, metric_file in enumerate(metrics):
-            ax =  axes[i,j]
-            df = dfs[metric_file]
-            df = df[df["method"] == method]
-            metric_name = metric_names[j]
-            max_x = 0
-            for k, module in enumerate(modules):
-                module_name = module_names[k]            
-                module_df0 = df[df["module"] == module]
-                per_seed = module_df0.groupby(["seed", "layer"])[metric].mean().reset_index()
-                module_df = per_seed.groupby(["layer"])[metric].agg(mean_confidence).apply(pd.Series).reset_index()
-                local_x = module_df["layer"] + 1
-                max_x = max(max_x, local_x.max())
-                y_mean_values = module_df["mean"] * 100
-                y_min_values = module_df["ci_low"] * 100
-                y_max_values = module_df["ci_high"] * 100
-                very_min = min(very_min, y_min_values.min())
-                very_max = max(very_max, y_max_values.max())
-                ln = ax.plot(local_x, y_mean_values, label=module_name, linewidth=1)
-                if (i == 0) and (j == 0):
-                    ordered_handles.append(ln[0])
-                    ordered_labels.append(module_name)
-                ax.fill_between(local_x, y_min_values, y_max_values, color=ln[0].get_color(), alpha=0.2)
-            ax.set_xlim(0.5, max_x+0.5)
-  
-            x_values = np.arange(1, max_x + 1)
-            xticks = [x for x in x_values if x % 3 == 0 or x == 1]  # always show layer 1 + every 3rd
-            xlabels = [str(x) for x in xticks]
+        if method != "repsim":        
+            for j, metric_file in enumerate(metrics):
+                ax =  axes[i,j]
+                df = dfs[metric_file]
+                df = df[df["method"] == method]
+                metric_name = metric_names[j]
+                max_x = 0
+                for k, module in enumerate(modules):
+                    module_name = module_names[k]            
+                    module_df0 = df[df["module"] == module]
+                    per_seed = module_df0.groupby(["seed", "layer"])[metric].mean().reset_index()
+                    module_df = per_seed.groupby(["layer"])[metric].agg(mean_confidence).apply(pd.Series).reset_index()
+                    local_x = module_df["layer"] + 1
+                    max_x = max(max_x, local_x.max())
+                    y_mean_values = module_df["mean"] * 100
+                    y_min_values = module_df["ci_low"] * 100
+                    y_max_values = module_df["ci_high"] * 100
+                    very_min = min(very_min, y_min_values.min())
+                    very_max = max(very_max, y_max_values.max())
+                    ln = ax.plot(local_x, y_mean_values, label=module_name, linewidth=1)
+                    if (i == 0) and (j == 0):
+                        ordered_handles.append(ln[0])
+                        ordered_labels.append(module_name)
+                    ax.fill_between(local_x, y_min_values, y_max_values, color=ln[0].get_color(), alpha=0.2)
+        else:
+            submethods = ["repsim-last", "repsim-mean"]
+            submethod_names = ["RepSim Last", "RepSim Mean"]
+            for j, metric_file in enumerate(metrics):
+                ax =  axes[i,j]
+                df = dfs[metric_file]
+                metric_name = metric_names[j]
+                max_x = 0
+                for k, submethod in enumerate(submethods):
+                    submethod_name = submethod_names[k]          
+                    if submethod_name == "repsim-last":
+                        color = "black"
+                        linestyle = "-"
+                    elif submethod_name == "repsim-mean":
+                        color = "black"
+                        linestyle = "--"
+                    else:
+                        color = None         # let Matplotlib choose
+                        linestyle = "-"                      
+                    submethod_df0 = df[df["method"] == submethod]
+                    per_seed = submethod_df0.groupby(["seed", "layer"])[metric].mean().reset_index()
+                    submethod_df = per_seed.groupby(["layer"])[metric].agg(mean_confidence).apply(pd.Series).reset_index()
+                    local_x = submethod_df["layer"] + 1
+                    max_x = max(max_x, local_x.max())
+                    y_mean_values = submethod_df["mean"] * 100
+                    y_min_values = submethod_df["ci_low"] * 100
+                    y_max_values = submethod_df["ci_high"] * 100
+                    very_min = min(very_min, y_min_values.min())
+                    very_max = max(very_max, y_max_values.max())
+                    ln = ax.plot(local_x, y_mean_values, label=submethod_name, linewidth=1,
+                                color=color,
+                                linestyle=linestyle                                 
+                                 )
+                    if not repsim_handle_init:
+                        ordered_handles.append(ln[0])
+                        ordered_labels.append(submethod_name)
+                        repsim_handle_init = True
+                    ax.fill_between(local_x, y_min_values, y_max_values, color=ln[0].get_color(), alpha=0.2)
+        ax.set_xlim(0.5, max_x+0.5)
 
-            ax.set_xticks(xticks)
-            ax.set_xticklabels(xlabels, fontsize=7, verticalalignment='center')
-            ax.tick_params(axis='x', length=1)
-            ax.tick_params(axis='y', pad=0, length=1)
-            ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{int(value)}"))            
-            # ax.set_ylabel(y_title, fontsize=10, labelpad=0)
-            if j == 0:
-                ax.set_ylabel(method_name, fontsize=10, labelpad=0)
-            ylabels = [60,70,80,90]
-            ax.set_yticks(ylabels)
-            ax.set_yticklabels(ylabels, fontsize=7, verticalalignment='center')
-            ax.set_ylim(very_min, very_max)
-            # ax.set_xlabel("Layers", fontsize=8, labelpad=0)
-            if i == 0:
-                ax.set_title(metric_name, fontsize=10, pad=0)
-            for yhline in [60,70,80,90]:
-                ax.axhline(y=yhline, color="gray", linewidth=0.5, linestyle="--")
-            # if x_max_pos is not None:
-            #     ax.axvline(x=x_max_pos, color="gray", linewidth=0.5, linestyle="--")
+        x_values = np.arange(1, max_x + 1)
+        xticks = [x for x in x_values if x % 3 == 0 or x == 1]  # always show layer 1 + every 3rd
+        xlabels = [str(x) for x in xticks]
+
+        ax.set_xticks(xticks)
+        ax.set_xticklabels(xlabels, fontsize=7, verticalalignment='center')
+        ax.tick_params(axis='x', length=1)
+        ax.tick_params(axis='y', pad=0, length=1)
+        ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{int(value)}"))            
+        # ax.set_ylabel(y_title, fontsize=10, labelpad=0)
+        if j == 0:
+            ax.set_ylabel(method_name, fontsize=10, labelpad=0)
+        ylabels = [60,70,80,90]
+        ax.set_yticks(ylabels)
+        ax.set_yticklabels(ylabels, fontsize=7, verticalalignment='center')
+        ax.set_ylim(very_min, very_max)
+        # ax.set_xlabel("Layers", fontsize=8, labelpad=0)
+        if i == 0:
+            ax.set_title(metric_name, fontsize=10, pad=0)
+        for yhline in [60,70,80,90]:
+            ax.axhline(y=yhline, color="gray", linewidth=0.5, linestyle="--")
+        # if x_max_pos is not None:
+        #     ax.axvline(x=x_max_pos, color="gray", linewidth=0.5, linestyle="--")
+        ax.set_xlim(0.5, max_x+0.5)
+
+        x_values = np.arange(1, max_x + 1)
+        xticks = [x for x in x_values if x % 3 == 0 or x == 1]  # always show layer 1 + every 3rd
+        xlabels = [str(x) for x in xticks]
+
+        ax.set_xticks(xticks)
+        ax.set_xticklabels(xlabels, fontsize=7, verticalalignment='center')
+        ax.tick_params(axis='x', length=1)
+        ax.tick_params(axis='y', pad=0, length=1)
+        ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{int(value)}"))            
+        # ax.set_ylabel(y_title, fontsize=10, labelpad=0)
+        if j == 0:
+            ax.set_ylabel(method_name, fontsize=10, labelpad=0)
+        ylabels = [60,70,80,90]
+        ax.set_yticks(ylabels)
+        ax.set_yticklabels(ylabels, fontsize=7, verticalalignment='center')
+        ax.set_ylim(very_min, very_max)
+        # ax.set_xlabel("Layers", fontsize=8, labelpad=0)
+        if i == 0:
+            ax.set_title(metric_name, fontsize=10, pad=0)
+        for yhline in [60,70,80,90]:
+            ax.axhline(y=yhline, color="gray", linewidth=0.5, linestyle="--")
+        # if x_max_pos is not None:
+        #     ax.axvline(x=x_max_pos, color="gray", linewidth=0.5, linestyle="--")
 
     fig.legend(ordered_handles, ordered_labels, loc='lower center', fontsize=8,
                 ncol=len(ordered_handles), borderaxespad = 0,  # Arrange all legend items in one row
