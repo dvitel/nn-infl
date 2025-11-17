@@ -14,7 +14,7 @@ from functools import partial
 import json
 import os
 import re
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 import datasets
 from kronfluence import Analyzer, FactorArguments, ScoreArguments, Task, prepare_model
@@ -747,6 +747,20 @@ def set_grad_values(all_grads: list[torch.Tensor], model: torch.nn.Module, activ
             g[sampleId] = p.grad
     model.zero_grad()
 
+def set_activ_values(model: torch.nn.Module, dataloader: DataLoader, device = "cuda"):     
+    with torch.no_grad():
+        for sampleId, batch in enumerate(dataloader):
+            # model.zero_grad()
+            # if autoregressive: # labels are inputs - teacher forcing
+            #     batch["labels"] = batch["input_ids"]
+            batch.to(device)
+            outputs = model(**batch)
+            # loss = outputs.loss
+            # loss.backward()
+            # for g, p in zip(all_grads, active_params):
+            #     g[sampleId] = p.grad
+    # model.zero_grad()    
+
 # here we assume that positive 'infl' is good and negative is 'bad'
 
 def matrix_hf_fn(int_view: torch.Tensor, val_grad: torch.Tensor, train_grad: torch.Tensor, **_) -> None:
@@ -1460,6 +1474,107 @@ def kronfl(task='sentense',
     torch.save(scores, infl_path)
     pass 
 
+def repsim(task='sentense', 
+            method: Literal["last", "mean"] = "last", 
+            checkpoint='m_bl',
+            dataset:str="",
+            dataset_path:str=".",
+            device='cuda',
+            i_prefix='i_ds',
+            train_batch_size: int = 128,
+            val_batch_size: int = 128):
+
+    model_path = f"{cwd}/{checkpoint}_{seed}"
+    print(f"Loading model {model_path}...")
+    lora_model = load_causal_LORA_model(model_name_or_path=model_path)
+    lora_model.to(device)
+    lora_model.eval()  
+
+    print(f"Loading datasets {dataset} from {dataset_path}...")
+    trainset = Dataset.load_from_disk(f"{dataset_path}/{dataset}_train.hf")
+    valset = Dataset.load_from_disk(f"{dataset_path}/{dataset}_test.hf")
+
+    tokenizer = load_causal_tokenizer(model_path)   
+    
+    datasets = causal_tokenize(tokenizer, device=device, dataset=dataset, train=trainset, validation=valset)
+
+    collator = DataCollatorWithPadding(tokenizer=tokenizer, padding="longest", return_tensors="pt")  
+
+    def add_sample_id(example, idx):
+        example['sample_id'] = idx
+        return example
+    trainset = datasets['train'].map(add_sample_id, with_indices=True)
+    valset = datasets['validation'].map(add_sample_id, with_indices=True)
+
+
+    # Storage for activations
+    activations = {}
+    
+    if method == "last":
+        def make_hook(layer_id):
+            def hook(module, inp, out):
+                activations[layer_id] = out[:,-1,:].detach()
+            return hook
+    elif method == "mean":
+        def make_hook(layer_id):
+            def hook(module, inp, out):
+                activations[layer_id] = out.mean(dim=1).detach()
+            return hook
+    else:
+        raise ValueError(f"Unknown repsim method {method}")
+
+    try:
+        layers = lora_model.base_model.model.model.layers
+    except:
+        named_modules = [name for name, _ in lora_model.named_modules() if "layer" in name.lower() or "block" in name.lower()]
+        print(f"Cannot find lora_model.base_model.model.model.layers. Available modules: {named_modules}")
+        raise ValueError(f"Cannot find lora_model.base_model.model.model.layers")
+    # Attach hooks to all transformer blocks
+    int_matrices = {}
+    for i, block in enumerate(layers):
+        block.register_forward_hook(make_hook(i))
+        int_matrices[i] = torch.zeros((len(valset), len(trainset)), dtype=torch.bfloat16, device=device)
+            
+    print(f"Running repsim...")
+
+    train_val_splits = DatasetSplits(trainset, train_batch_size, valset, val_batch_size)
+
+    val_activations = {}
+    for val_shift, cur_val_dataset, train_shift, cur_train_dataset in tqdm(train_val_splits): 
+        if train_shift == 0:
+            for mva in val_activations.values():
+                del mva
+            val_dataloader = DataLoader(cur_val_dataset,
+                            shuffle=False, 
+                            collate_fn=collator,
+                            batch_size=val_batch_size)
+            set_activ_values(lora_model, val_dataloader, device=device)
+            val_activations = dict(activations)
+            activations.clear()
+        train_dataloader = DataLoader(cur_train_dataset,
+                            shuffle=False, 
+                            collate_fn=collator,
+                            batch_size=train_batch_size)
+        set_activ_values(lora_model, train_dataloader, device=device)
+        train_activations = dict(activations)
+        activations.clear()
+        
+        
+        for cur_module_id in train_activations.keys():
+            module_train_activations = train_activations[cur_module_id]
+            module_val_activations = val_activations[cur_module_id]
+            module_int_matrix = int_matrices[cur_module_id]
+            cur_int_matrix_view = module_int_matrix[val_shift:val_shift + len(cur_val_dataset), train_shift:train_shift + len(cur_train_dataset)]
+            matrix_cos_fn(cur_int_matrix_view, module_val_activations, module_train_activations)
+        for mda in train_activations.values():
+            del mda
+        torch.cuda.empty_cache() 
+
+    infl_path = os.path.join(cwd, f'{i_prefix}_repsim-{method}_{task}_{seed}.pt')
+    print(f"Saving {infl_path}...")
+    torch.save(int_matrices, infl_path)
+    pass
+
 
 def load_ds_info(task_in_dir: str, task: str, with_input_ids = False):
     ds_path = os.path.join(task_in_dir, f'd_{task}_{seed}')
@@ -1962,7 +2077,7 @@ def finetune2(task = 'qnli',
 parser = argh.ArghParser()
 parser.add_commands([preprocess, init_checkpoint, finetune, grads, infl, infl_matrix, scores, 
                      ndr, finetune2, infl_noise, set_logits, cancel_eff, combine_cancel,
-                     infl_matrix_causal, kronfl, auc_recall])
+                     infl_matrix_causal, kronfl, auc_recall, repsim])
 
 def test_infl_vs_infl_matrix(file1: str, file2: str):
     infl = torch.load(file1)

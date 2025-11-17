@@ -1,7 +1,7 @@
 #!/bin/bash -l
 #SBATCH --job-name=q-ds-krfl
 #SBATCH --time=72:00:00
-#SBATCH --output ds-infl-%a.out
+#SBATCH --output ds-krfl-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/qwen
 #SBATCH -p hpg-b200
 #SBATCH --gpus=1

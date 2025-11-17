@@ -31,7 +31,7 @@ matplotlib.rcParams['pdf.fonttype'] = 42
 matplotlib.rcParams['ps.fonttype'] = 42
 matplotlib.rcParams['font.family'] = ['Times']    
 
-benchmark = ["qnli", "mrpc", "sst2", "qqp", "cola", "mnli", "rte", "stsb"]
+benchmark = ["qnli", "mrpc", "sst2", "cola", "qqp", "mnli", "rte", "stsb"]
 
 # from cifar import DatasetSplits
 
@@ -2307,118 +2307,168 @@ def process_ndr_table(base_path: str, tasks: list[str] = benchmark, output_ranks
 
     pass
 
+# df1 = all_score_df.loc[:,:,"total","all"]
 
-def draw_vote_k_ndr(base_path: str, tasks: list[str] = benchmark, 
-                        metric_name = 30, ndr_prefix = "ndr_bl", layers = None,
-                        best_group_by = None, custom_suffix = "",
-                        agg_method_names = None, infl_method_names = None): 
+# df1 *= 100
+
+# df2 = get_confidence_interval(df1)
+
+# df3 = df2.reset_index()
+
+# df3["agg"] = df3["agg"].str.extract(r"(\d+)$").astype(int)
+
+# df4 = df3.sort_values(by=["infl", "agg"])
+
+# df4.to_csv(base_path + "/ndr/d4.csv")
+
+
+
+def draw_vote_k_ndr(base_path: str, 
+                        methods: list[str] = ["hf","cos","datainf"],
+                        method_names: list[str] = ["TracIn","Cosine","DataInf"],
+                        tasks: list[str] = benchmark, 
+                        modules: list[str] = [
+                            "value B",
+                            "query B",
+                            "value A",
+                            "query A",
+                        ],
+                        module_names: list[str] = [
+                            "Value B",
+                            "Query B",
+                            "Value A",
+                            "Query A",
+                        ],
+                        metric_name = 30, 
+                        num_layers=24,
+                        ndr_prefix = "ndr_vote_k", 
+                        custom_suffix = "vote_k",
+                        agg_methods=[
+                            "vote2-c-10",
+                            "vote2-c-20",
+                            "vote2-c-30",
+                            "vote2-c-40",
+                            "vote2-c-50",
+                            "vote2-c-60",
+                            "vote2-c-70",
+                            "vote2-c-80",
+                            "vote2-c-90",
+                            "vote2-c-100"
+                        ], figsize=(8, 6)): 
     #NOTE: metric_name in ["f30", "auc_ndr"]):
 
-    dfs = []
-    for task in tasks:
-        df = pd.read_pickle(os.path.join(base_path, "ndr", f"{ndr_prefix}_{task}.pcl"))
-        df.drop(columns=["scores", "noise_mask"], inplace=True)
-        dfs.append(df)
-    df = pd.concat(dfs, ignore_index=False)
+    layers = list(range(num_layers))
+    layers_str = [str(l) for l in layers]
 
-    if infl_method_names is not None:
-        df = df.loc[df.index.get_level_values('infl').isin(infl_method_names)]
-        pass
+    # df = load_df(base_path, tasks, use_ndr = True, ndr_prefix = ndr_prefix, metric_name=metric_name, 
+    #             agg_method_names=agg_methods, infl_method_names=methods)
 
-    if agg_method_names is not None:
-        df = df.loc[df.index.get_level_values('agg').isin(agg_method_names)]
-        pass
+    cache_path = os.path.join(base_path, f"cached_layer_ndr_{custom_suffix}.pcl")
 
-    if layers is not None:
-        df = df.loc[df.index.get_level_values('layer').isin(layers)]
-        df = df.loc[df.index.get_level_values('module') == "all"]
-        pass
-
-
-    metric_df = df.reset_index().pivot(index=["infl", "agg", "layer", "module"], columns=["task", "run_id"], values=[metric_name])
-
-    ranks = metric_df.rank(axis = 0, ascending=False, method="average")
+    if os.path.exists(cache_path):
+        score_df = pd.read_pickle(cache_path) 
+    else:
+        df = load_df(base_path, tasks, use_ndr = True, ndr_prefix = ndr_prefix, metric_name=metric_name, 
+                    agg_method_names=agg_methods, infl_method_names=methods)
     
-    suffix = ""
-    if output_ranks:
-        metric_df = ranks
-        suffix = "-rank"
+        all_score_df = df.pivot(index=["infl", "agg", "layer", "module"], columns=["task", "seed"], values=metric_name)
+        score_df = all_score_df[all_score_df.index.get_level_values("layer").isin(layers_str)]
+        score_df *= 100.0
+        score_df.to_pickle(cache_path)
 
-    metric_by_ds_mean = metric_df.groupby(level=1, axis=1).mean()
-    metric_by_ds_std = metric_df.groupby(level=1, axis=1).std()
-    metric_by_ds_std.columns = [c + "_std" for c in metric_by_ds_std.columns]
-    metric_by_ds = pd.merge(metric_by_ds_mean, metric_by_ds_std, left_index=True, right_index=True)
-    rank_columns = ["rank", "rank_std"]
-    metric_by_ds["rank"] = ranks.mean(axis=1)
-    metric_by_ds["rank_std"] = ranks.std(axis=1)
+    conf_int_df = get_confidence_interval(score_df)
 
-    if best_group_by is not None:
-        best_idxs = metric_by_ds.groupby(level=best_group_by, axis=0)['rank'].idxmin()
-        metric_by_ds = metric_by_ds.loc[best_idxs]
-        metric_df = metric_df.loc[best_idxs]
-        ranks = metric_df.rank(axis = 0, ascending=False, method="average")
-        metric_by_ds["rank"] = ranks.mean(axis=1)
-        metric_by_ds["rank_std"] = ranks.std(axis=1)
-    
-    metric_by_ds = metric_by_ds.sort_values(by=['rank', 'rank_std'], ascending=[True, True])
+    # conf_int_df = conf_int_df.copy()
+    # conf_int_df.index = conf_int_df.index.set_levels(
+    #     conf_int_df.index.levels[conf_int_df.index.names.index("agg")]
+    #     .str.extract(r'(\d+)$')[0].astype(int),
+    #     level="agg"
+    # )
+    # conf_int_df.index = conf_int_df.index.set_levels(
+    #     conf_int_df.index.get_level_values("layer").astype(int),
+    #     level="layer"
+    # )    
 
-    metric_by_ds = metric_by_ds[[*[de for d in tasks for de in [d, d + "_std"]], *rank_columns]]
-    # metric_by_ds.to_csv(f"{base_path}/{metric_name}{suffix}-avg.csv")
 
-    values_to_highlight = metric_by_ds[tasks].to_numpy().max(axis=0)
+    very_min = conf_int_df.min(axis=1).min()
+    very_max = conf_int_df.max(axis=1).max()    
 
-    rows = []
-    for row_id, row in enumerate(metric_by_ds.reset_index().to_dict(orient="records")):
-        new_row = {}
-        infl_method = row["infl"]
-        agg_method = row["agg"]
-        layer = row["layer"]
-        module = row["module"].replace("embed_tokens", "WE")
-        if with_row_id:
-            new_row["id"] = (row_id + 1)
-        new_row["infl"] = infl_method
-        new_row["agg"] = agg_method
-        find_layer = re.match(r"layers\s(\d+)\s", module)
-        if find_layer is not None:
-            layer = find_layer.group(1)
-            module = module.replace(find_layer.group(0), "")
-        new_row["layer"] = "WE" if module == "WE" else layer
-        new_row["module"] = module
-        for did, d in enumerate([*tasks, "rank"]):
-            should_highlight = False
-            if d == "rank":
-                m = round(row[d] * 10) / 10
-                m_std = round(row[d + "_std"] * 10) / 10
-            else:
-                should_highlight = row[d] == values_to_highlight[did]
-                m = round(row[d] * 1000) / 10
-                m_std = round(row[d + "_std"] * 1000) / 10
-            m = str(m).rstrip("0").rstrip(".").lstrip("0").replace("-0.", "-.")
-            m_std = str(m_std).rstrip("0").rstrip(".").lstrip("0")
+    plt.ioff()
+    fig, axes = plt.subplots(len(modules), len(methods)) #, figsize=figsize, subplot_kw={'projection': '3d'})
+    fig.subplots_adjust(wspace=0, hspace=0.0, left=0.0, right=1.0, bottom=0.0, top=1.0)
+    # ordered_handles = []
+    # ordered_labels = []
 
-            if should_highlight:
-                if m_std == "":
-                    new_row[d] = f"\\textbf{{{m}}}"
-                else:
-                    new_row[d] = f"\\textbf{{{m}}} $\pm$ {m_std}"
-            else:
-                if m_std == "":
-                    new_row[d] = m
-                else:
-                    new_row[d] = f"{m} $\pm$ {m_std}"
-        rows.append(new_row)
+    for i, module in enumerate(modules):
+        module_name = module_names[i]
+        module_df = conf_int_df.loc[:,:,:,module]
 
-    with open(f"{base_path}/tables/ndr-{metric_name}{suffix}{custom_suffix}-avg.tex", "w") as stats_file:
-        s = tabulate(rows, headers = "keys", showindex=False, tablefmt="latex")
-        s = s.replace("\\textbackslash{}", "\\").replace("\\$", "$").replace("hf\_we\_topk\_10", "hf$^{10}_{we}$").replace("hf\_we\_", "hf$_{we}$").replace("\\_", "_").replace("\{", "{").replace("\}", "}").replace("\^{}", "^").replace("lllllllllll", "ll|ccccccccc").replace("rand", "\\hline rand")\
-            .replace("_10", "$^{10}$").replace("_50", "$^{50}$")\
-            .replace("commonset", "cset").replace("-20", "$^{20}$").replace("-30", "$^{30}$")\
-            .replace("commonsubset", "csset").replace("out_proj", "proj")\
-            .replace('self_attn ', '')\
-            .replace('v_proj', 'value').replace('q_proj', 'query')
-        print(s, file = stats_file)
+        fig.text(
+            0.0,  # x near left edge
+            1.0 - (i + 0.5) / len(modules),  # y per row
+            module_name,
+            ha='left', va='center', rotation='vertical', fontsize=10
+        )
 
+        for j, method in enumerate(methods):
+            method_name = method_names[j]
+            if i == 0:
+                fig.text(
+                    (j + 0.5) / len(methods),  # x position
+                    1.0,                     # y near top
+                    method_name,
+                    ha='center', va='top', fontsize=10
+                )
+
+            method_df = module_df.loc[method, :, :].reset_index()
+            method_df["agg"]   = method_df["agg"].str.extract(r"(\d+)$").astype(int)
+            method_df["layer"] = method_df["layer"].astype(int) + 1            
+
+            pivot = method_df.pivot(index="layer", columns="agg", values="mean")
+            X, Y = np.meshgrid(pivot.columns.to_numpy(), pivot.index.to_numpy())
+            Z = pivot.values
+
+            ax = axes[i, j]
+            # X = method_df["agg"].values
+            # Y = method_df["layer"].values + 1
+            # Z = method_df["mean"].values
+
+            # ax.plot_surface(X, Y, Z, edgecolor='royalblue', lw=0.5,
+            #                 alpha=0.2, rstride=4, cstride=1)          
+
+            # ax.contourf(X, Y, Z, zdir='z', offset=very_min, cmap='coolwarm')
+            # ax.contourf(X, Y, Z, zdir='x', offset=0, cmap='coolwarm')
+            # ax.contourf(X, Y, Z, zdir='y', offset=num_layers + 1, cmap='coolwarm')
+
+            ax.pcolormesh(X, Y, Z, cmap='coolwarm', shading='auto')  
+
+            ax.yaxis.set_label_position("right")
+            ax.set_xticks([])
+            ax.set_yticks([])            
+
+
+            # ax.set(xlim=(0, 110), ylim=(0, num_layers + 1), zlim=(very_min, very_max))
+            ax.set(xlim=(10, 100), ylim=(1, num_layers)) #, zlim=(very_min, very_max))
+            ax.set_xlabel('Vote k, \\%', fontsize=6, labelpad=0) #-10)
+            ax.set_ylabel('Layer', fontsize=6, labelpad=0) #, labelpad=-10)
+            # ax.set_zlabel('NDR, \\%', fontsize=6) #, labelpad=-10)
+            ax.tick_params(axis='x', labelsize=6) #, pad=-6)
+            ax.tick_params(axis='y', labelsize=6) #, pad=-6)
+            for spine in ax.spines.values():
+                spine.set_visible(False)            
+            # ax.tick_params(axis='z', labelsize=6) #, pad=-6)
+            # ax.set_proj_type('ortho')   # optional: makes spacing more compact
+            # ax.margins(0)
+
+    # fig.legend(ordered_handles, ordered_labels, loc='lower center', fontsize=8,
+    #             ncol=len(ordered_handles), borderaxespad = 0,  # Arrange all legend items in one row
+    #             bbox_to_anchor=(0.5, 0)  # Adjust position (centered below the grid)
+    #     )        
+    fig.tight_layout(w_pad=0.0, h_pad=0.0, pad=0.0, rect=[0, 0, 1, 1])
+    fig.savefig(os.path.join(base_path, "plots", f"layers-ndr-hm-{custom_suffix}.pdf"))
+    plt.close(fig)
     pass
+
 
 def process_ndr_table2(base_path: str, tasks: list[str],
                         infl_methods = [ 'datainf', 'hf', 'cos'],
@@ -4651,13 +4701,21 @@ if __name__ == "__main__":
     #     counts.setdefault((c["infl_method"], c["module_name"]), []).append(c["seed"])
     # cnts = {s:c for s,c in counts.items() if len(c) < 10}
 
+    pass
+
 
     # network = "mistral"
-    network="roberta"
+    # network="roberta"
+    network="qwen"
     group_file = "./groups.json"
     base_path = f"data/{network}"
     selected_layers = network_layers[network]
     noise_only = False
+
+    model_num_layers = {
+        "roberta": 24,
+        "qwen": 28
+    }
 
     infl_method_names = ["hf_we_", "hf_we_topk_10",  "hf", "cos", "datainf", "denoise", "rand"]
     # agg_method_names = ["mean", "rank-c", "vote2-c", '']
@@ -4757,6 +4815,44 @@ if __name__ == "__main__":
     agg_method_names = ["vote2-c-10", "vote2-c-20", "vote2-c-30", "vote2-c-40", "vote2-c-50", "vote2-c-60", "vote2-c-70", 'vote2-c-80', 'vote2-c-90', 'vote2-c-100']
     # agg_method_names = ['cset-c']
     dss = ["mrpc", "qnli", "sst2", "qqp", "cola", "mnli", "rte", "stsb"]
+    draw_vote_k_ndr(
+        base_path, 
+        methods = ["hf","cos","datainf"],
+        method_names = ["TracIn","Cosine","DataInf"],
+        tasks = benchmark, 
+        modules = [
+            # "value B",
+            # "query B",
+            # "value A",
+            # "query A",
+            'self_attn v_proj B',
+            'self_attn q_proj B', 
+            'self_attn v_proj A',
+            'self_attn q_proj A', 
+        ],
+        module_names = [
+            "Value B",
+            "Query B",
+            "Value A",
+            "Query A",
+        ],
+        metric_name = 30, 
+        ndr_prefix = "ndr_vote_k", 
+        custom_suffix = "vote_k",
+        agg_methods=[
+            "vote2-c-10",
+            "vote2-c-20",
+            "vote2-c-30",
+            "vote2-c-40",
+            "vote2-c-50",
+            "vote2-c-60",
+            "vote2-c-70",
+            "vote2-c-80",
+            "vote2-c-90",
+            "vote2-c-100"
+        ], figsize=(2 * 3, 2 * 4),
+        num_layers = model_num_layers[network]
+    )
     # # dss = ["mrpc", "qnli", "sst2", "qqp"]
     # dss = ["mrpc"]
     # base_infl_path = os.path.join(base_path, "infl-tensors")
@@ -4777,8 +4873,7 @@ if __name__ == "__main__":
     #         process_ndr_table(base_path, tasks=benchmark, with_row_id=False,
     #                             layers=selected_layers, 
     #                             infl_method_names=infl_ms,
-    #                             agg_method_names=[am, f'{am}-c'], custom_suffix=f"-{infl_ms[0]}-{am}-s")
-    # draw_vote_k_ndr()
+    #                             agg_method_names=[am, f'{am}-c'], custom_suffix=f"-{infl_ms[0]}-{am}-s")    
     # process_ndr_table(base_path, tasks=dss, with_row_id=False, custom_suffix = "-vote-k", 
     #                   best_group_by=["infl", "agg"], layers=selected_layers, ndr_prefix="ndr_vote_k",
     #                   agg_method_names=agg_method_names)

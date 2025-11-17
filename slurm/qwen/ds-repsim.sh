@@ -1,8 +1,8 @@
 #!/bin/bash -l
-#SBATCH --job-name=m-ds-krfl
+#SBATCH --job-name=q-ds-repsim
 #SBATCH --time=72:00:00
-#SBATCH --output ds-krfl-%a.out
-#SBATCH -D /blue/anshumanc.usf/nn-infl/mistral
+#SBATCH --output ds-repsim-%a.out
+#SBATCH -D /blue/anshumanc.usf/nn-infl/qwen
 #SBATCH -p hpg-b200
 #SBATCH --gpus=1
 #SBATCH --mem=16G
@@ -20,9 +20,9 @@ datasets=("grammars" "math_without_reason" "math_with_reason")
 task=${tasks[$SLURM_ARRAY_TASK_ID]}
 dataset=${datasets[$SLURM_ARRAY_TASK_ID]}
 
-task_cwd=/blue/anshumanc.usf/nn-infl/mistral/$task
+task_cwd=/blue/anshumanc.usf/nn-infl/qwen/$task
 
-echo 'Computing kronfluence...'
+echo 'Computing RepSim...'
 
 for run_id in {0..4}; do
     echo "Seed $run_id"
@@ -30,14 +30,28 @@ for run_id in {0..4}; do
     HF_TOKEN=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 \
     INFL_SEED=$run_id \
     INFL_CWD=$task_cwd \
-    python /home/dvitel.usf/nn-infl/src/exp.py kronfl \
+    python /home/dvitel.usf/nn-infl/src/exp.py repsim \
         --task $task \
-        --method ekfac \
+        --method last \
         --checkpoint m_ds \
         --dataset $dataset \
         --dataset-path /home/dvitel.usf/nn-infl/datasets \
         --i-prefix i_ds
 done
 
+for run_id in {0..4}; do
+    echo "Seed $run_id"
+    HF_HOME=/blue/anshumanc.usf/nn-infl/.cache \
+    HF_TOKEN=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 \
+    INFL_SEED=$run_id \
+    INFL_CWD=$task_cwd \
+    python /home/dvitel.usf/nn-infl/src/exp.py repsim \
+        --task $task \
+        --method mean \
+        --checkpoint m_ds \
+        --dataset $dataset \
+        --dataset-path /home/dvitel.usf/nn-infl/datasets \
+        --i-prefix i_ds
+done
 
-echo 'Done kronfluence'
+echo 'Done RepSim'

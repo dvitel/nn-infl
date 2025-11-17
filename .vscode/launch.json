@@ -375,6 +375,28 @@
             }
         },
         {
+            "name": "RepSim Infl matrix Causal Sentense QWEN 2.5 0.5",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "repsim", 
+                "--task=sentense",
+                "--method=mean", 
+                "--checkpoint=checkpoint", 
+                "--dataset=grammars",
+                "--dataset-path=${workspaceFolder}/datasets",
+                "--i-prefix=i_ds"
+            ],
+            "env": {
+                "INFL_SEED": "42",
+                "INFL_CWD": "./data/dev/qwen/sentense",
+                "HF_TOKEN": "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",
+                "HF_HOME": "./.cache"
+            }
+        },
+        {
             "name": "AUC Recall Sentense QWEN 2.5 0.5",
             "type": "debugpy",
             "request": "launch",
