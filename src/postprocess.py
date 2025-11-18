@@ -463,6 +463,7 @@ def maj_matrix_score(int_matrix: torch.Tensor, *, vote_ratio = 0.5, noise_ratio 
         if enough_votes >= noise_size:
             break
     scores = 1.0 - votes / total_int_matrix.shape[-1]
+    del test_ids_ordered, voters, voter_ids
     return scores
 
 # def get_pareto_front_indexes_neg(int_matrix: torch.Tensor) -> np.ndarray:
@@ -512,7 +513,7 @@ def pareto_matrix_score(int_matrix: torch.Tensor, *, noise_mask: torch.Tensor, n
     return scores    
 
 def confident_matrix_score(int_matrix: torch.Tensor, *, base_method_fn = mean_matrix_score, 
-                            trainset_labels: torch.Tensor, inflset_labels: torch.Tensor, 
+                            trainset_labels: torch.Tensor, inflset_labels: torch.Tensor, correct_infl_preds,
                             inflset_logits: torch.Tensor, n_confident = 50, **_) -> torch.Tensor:    
     ''' 3-D tensor: train sample * module * infl sample '''
     # TODO: for multiclass we should use maximal non-golden conterpart for confidence
@@ -522,7 +523,9 @@ def confident_matrix_score(int_matrix: torch.Tensor, *, base_method_fn = mean_ma
     infl_ids = torch.argsort(logit_dist, descending=True)[:n_confident_local]
     selected_int_matrix = int_matrix[:, :, infl_ids]
     del logit_dist
-    scores = base_method_fn(selected_int_matrix, trainset_labels = trainset_labels, inflset_labels = inflset_labels[infl_ids], inflset_logits = inflset_logits[infl_ids])
+    scores = base_method_fn(selected_int_matrix, trainset_labels = trainset_labels, inflset_labels = inflset_labels[infl_ids], 
+                            inflset_logits = inflset_logits[infl_ids],
+                            correct_infl_preds = correct_infl_preds)
     del infl_ids
     return scores
 
@@ -4607,7 +4610,10 @@ def auc_recall_metric_graphs(metrics: list[str],
             for j, metric_file in enumerate(metrics):
                 ax =  axes[i,j]
                 df = dfs[metric_file]
-                df = df[df["method"] == method]
+                df = df[df["method"] == method].copy()
+                df['layer'] = df['layer'].astype(int)
+                df['seed'] = df['seed'].astype(int)
+                df[metric] = df[metric].astype(float)
                 metric_name = metric_names[j]
                 max_x = 0
                 for k, module in enumerate(modules):
@@ -4633,7 +4639,7 @@ def auc_recall_metric_graphs(metrics: list[str],
             submethod_names = ["RepSim Last", "RepSim Mean"]
             for j, metric_file in enumerate(metrics):
                 ax =  axes[i,j]
-                df = dfs[metric_file]
+                df = dfs[metric_file].copy()
                 metric_name = metric_names[j]
                 max_x = 0
                 for k, submethod in enumerate(submethods):
@@ -4647,7 +4653,10 @@ def auc_recall_metric_graphs(metrics: list[str],
                     else:
                         color = None         # let Matplotlib choose
                         linestyle = "-"                      
-                    submethod_df0 = df[df["method"] == submethod]
+                    submethod_df0 = df[df["method"] == submethod].copy()                    
+                    submethod_df0['layer'] = submethod_df0['layer'].astype(int)
+                    submethod_df0['seed'] = submethod_df0['seed'].astype(int)
+                    submethod_df0[metric] = submethod_df0[metric].astype(float)
                     per_seed = submethod_df0.groupby(["seed", "layer"])[metric].mean().reset_index()
                     submethod_df = per_seed.groupby(["layer"])[metric].agg(mean_confidence).apply(pd.Series).reset_index()
                     local_x = submethod_df["layer"] + 1
@@ -4716,6 +4725,12 @@ if __name__ == "__main__":
     #     out_dir="./data/dev/qwen/sentense"
     # )
     # pass
+
+    # def util_cat(model:str, type: str):
+    #     df1 = pd.read_csv(f"./data/{model}/ds-0/metrics_{type}.csv")
+    #     df2 = pd.read_csv(f"./data/{model}/ds-0/metrics-rs_{type}.csv")
+    #     df3 = pd.concat([df1, df2], axis=0)
+    #     df3.to_csv(f"./data/{model}/ds-0/metrics-all_{type}.csv")    
 
 
     auc_recall_metric_graphs(

@@ -9,7 +9,7 @@
 #SBATCH --array=0-7%3
 
 module load conda
-conda activate /home/dvitel.usf/torch-env
+conda activate /blue/anshumanc.usf/nn-infl/nn-infl-env
 
 tasks=("qnli" "mrpc" "sst2" "qqp" "cola" "mnli" "rte" "stsb")
 

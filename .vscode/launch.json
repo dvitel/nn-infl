@@ -424,7 +424,10 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "ndr", "--task=qnli", "--infl-methods=hf,datainf", "--agg-methods=vote2-c-10,vote2-c", "--m-prefix=m_bl", "--i-prefix=i_bl", "--ndr-prefix=ndr_test_k", "--group-file=./groups.json"
+                "ndr", "--task=qnli", "--infl-methods=hf,datainf", 
+                "--agg-methods=mean,mean-c,rank,rank-c,vote2,vote2-c,rmin,median,cmean,mean_10,mean_50,commonset-10,commonset-30,commonset-40,commonset-80,commonsubset-10,commonsubset-30,commonsubset-40,commonsubset-80,commonsubset-40r,commonsubset-40rr", 
+                "--m-prefix=m_bl", "--i-prefix=i_bl", "--ndr-prefix=ndr_test_k", "--group-file=./groups.json",
+                "--levels=30", "--hist-bins=0"
             ],
             "env": {
                 "INFL_SEED": "42",
