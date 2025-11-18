@@ -3,13 +3,13 @@
 #SBATCH --time=72:00:00
 #SBATCH --output resnet-%j.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl
-#SBATCH -p hpg-ai # run on partition general
+#SBATCH -p hpg-b200 # run on partition general
 #SBATCH --open-mode=append
 #SBATCH --gpus=1 # 1 GPU
 #SBATCH --array=0-9
 
-module load conda/24.7.1
-conda activate /home/dvitel.usf/torch-env
+module load conda
+conda activate /blue/anshumanc.usf/nn-infl/nn-infl-env
 
 dataset=cifar10
 

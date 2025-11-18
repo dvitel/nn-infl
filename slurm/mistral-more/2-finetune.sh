@@ -3,13 +3,13 @@
 #SBATCH --time=72:00:00
 #SBATCH --output 2-tun-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/mistral-more
-#SBATCH -p hpg-ai # run on partition general
+#SBATCH -p hpg-b200 # run on partition general
 #SBATCH --gpus=1 # 1 GPU
 #SBATCH --mem=16G # default 4GB
 #SBATCH --array=0-7
 
-module load conda/24.7.1
-conda activate /home/dvitel.usf/torch-env
+module load conda
+conda activate /blue/anshumanc.usf/nn-infl/nn-infl-env
 
 #sst2 qqp mnli rte stsb
 tasks=("qnli" "mrpc" "sst2" "qqp" "cola" "mnli" "rte" "stsb")

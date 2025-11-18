@@ -4733,85 +4733,85 @@ if __name__ == "__main__":
     #     df3.to_csv(f"./data/{model}/ds-0/metrics-all_{type}.csv")    
 
 
-    auc_recall_metric_graphs(
-        metrics=[
-            "./data/qwen/ds/metrics_sentense.csv",
-            "./data/qwen/ds/metrics_math.csv",
-            "./data/qwen/ds/metrics_mathR.csv"
-        ],
-        metric_names=[
-            "Sentence AUC vs Layer, \\%", "Math AUC vs Layer, \\%", "Math w. Reason AUC vs Layer, \\%"
-        ],
-        methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
-        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
-        metric='auc',
-        modules=['A q', 'B q', 'A v', 'B v'],
-        module_names=["Query A", "Query B", "Value A", "Value B"],
-        y_title="Layer-wise AUC, \\%",
-        figsize=(8, 7),
-        out_dir="./data/qwen/ds"
-    )
-    pass
+    # auc_recall_metric_graphs(
+    #     metrics=[
+    #         "./data/qwen/ds/metrics_sentense.csv",
+    #         "./data/qwen/ds/metrics_math.csv",
+    #         "./data/qwen/ds/metrics_mathR.csv"
+    #     ],
+    #     metric_names=[
+    #         "Sentence AUC vs Layer, \\%", "Math AUC vs Layer, \\%", "Math w. Reason AUC vs Layer, \\%"
+    #     ],
+    #     methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
+    #     method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
+    #     metric='auc',
+    #     modules=['A q', 'B q', 'A v', 'B v'],
+    #     module_names=["Query A", "Query B", "Value A", "Value B"],
+    #     y_title="Layer-wise AUC, \\%",
+    #     figsize=(8, 7),
+    #     out_dir="./data/qwen/ds"
+    # )
+    # pass
 
-    auc_recall_metric_graphs(
-        metrics=[
-            "./data/qwen/ds/metrics_sentense.csv",
-            "./data/qwen/ds/metrics_math.csv",
-            "./data/qwen/ds/metrics_mathR.csv"
-        ],
-        metric_names=[
-            "Sentence Recall vs Layer, \\%", "Math Recall vs Layer, \\%", "Math w. Reason Recall vs Layer, \\%"
-        ],
-        methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
-        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
-        metric='recall',
-        modules=['A q', 'B q', 'A v', 'B v'],
-        module_names=["Query A", "Query B", "Value A", "Value B"],
-        y_title="Layer-wise Recall, \\%",
-        figsize=(8, 7),
-        out_dir="./data/qwen/ds"
-    )
-    pass
+    # auc_recall_metric_graphs(
+    #     metrics=[
+    #         "./data/qwen/ds/metrics_sentense.csv",
+    #         "./data/qwen/ds/metrics_math.csv",
+    #         "./data/qwen/ds/metrics_mathR.csv"
+    #     ],
+    #     metric_names=[
+    #         "Sentence Recall vs Layer, \\%", "Math Recall vs Layer, \\%", "Math w. Reason Recall vs Layer, \\%"
+    #     ],
+    #     methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
+    #     method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
+    #     metric='recall',
+    #     modules=['A q', 'B q', 'A v', 'B v'],
+    #     module_names=["Query A", "Query B", "Value A", "Value B"],
+    #     y_title="Layer-wise Recall, \\%",
+    #     figsize=(8, 7),
+    #     out_dir="./data/qwen/ds"
+    # )
+    # pass
 
-    auc_recall_metric_graphs(
-        metrics=[
-            "./data/mistral/ds/metrics_sentense.csv",
-            "./data/mistral/ds/metrics_math.csv",
-            "./data/mistral/ds/metrics_mathR.csv"
-        ],
-        metric_names=[
-            "Sentence AUC vs Layer, \\%", "Math AUC vs Layer, \\%", "Math w. Reason AUC vs Layer, \\%"
-        ],
-        methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
-        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
-        metric='auc',
-        modules=['A q', 'B q', 'A v', 'B v'],
-        module_names=["Query A", "Query B", "Value A", "Value B"],
-        y_title="Layer-wise AUC, \\%",
-        figsize=(8, 7),
-        out_dir="./data/mistral/ds"
-    )
-    pass
+    # auc_recall_metric_graphs(
+    #     metrics=[
+    #         "./data/mistral/ds/metrics_sentense.csv",
+    #         "./data/mistral/ds/metrics_math.csv",
+    #         "./data/mistral/ds/metrics_mathR.csv"
+    #     ],
+    #     metric_names=[
+    #         "Sentence AUC vs Layer, \\%", "Math AUC vs Layer, \\%", "Math w. Reason AUC vs Layer, \\%"
+    #     ],
+    #     methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
+    #     method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
+    #     metric='auc',
+    #     modules=['A q', 'B q', 'A v', 'B v'],
+    #     module_names=["Query A", "Query B", "Value A", "Value B"],
+    #     y_title="Layer-wise AUC, \\%",
+    #     figsize=(8, 7),
+    #     out_dir="./data/mistral/ds"
+    # )
+    # pass
 
-    auc_recall_metric_graphs(
-        metrics=[
-            "./data/mistral/ds/metrics_sentense.csv",
-            "./data/mistral/ds/metrics_math.csv",
-            "./data/mistral/ds/metrics_mathR.csv"
-        ],
-        metric_names=[
-            "Sentence Recall vs Layer, \\%", "Math Recall vs Layer, \\%", "Math w. Reason Recall vs Layer, \\%"
-        ],
-        methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
-        method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
-        metric='recall',
-        modules=['A q', 'B q', 'A v', 'B v'],
-        module_names=["Query A", "Query B", "Value A", "Value B"],
-        y_title="Layer-wise Recall, \\%",
-        figsize=(8, 7),
-        out_dir="./data/mistral/ds"
-    )
-    pass
+    # auc_recall_metric_graphs(
+    #     metrics=[
+    #         "./data/mistral/ds/metrics_sentense.csv",
+    #         "./data/mistral/ds/metrics_math.csv",
+    #         "./data/mistral/ds/metrics_mathR.csv"
+    #     ],
+    #     metric_names=[
+    #         "Sentence Recall vs Layer, \\%", "Math Recall vs Layer, \\%", "Math w. Reason Recall vs Layer, \\%"
+    #     ],
+    #     methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
+    #     method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
+    #     metric='recall',
+    #     modules=['A q', 'B q', 'A v', 'B v'],
+    #     module_names=["Query A", "Query B", "Value A", "Value B"],
+    #     y_title="Layer-wise Recall, \\%",
+    #     figsize=(8, 7),
+    #     out_dir="./data/mistral/ds"
+    # )
+    # pass
     
     # ndr_test()
     # pass
@@ -4829,8 +4829,8 @@ if __name__ == "__main__":
 
 
     # network = "mistral"
-    # network="roberta"
-    network="qwen"
+    network="roberta"
+    # network="qwen"
     group_file = "./groups.json"
     base_path = f"data/{network}"
     selected_layers = network_layers[network]
@@ -4939,6 +4939,15 @@ if __name__ == "__main__":
     agg_method_names = ["vote2-c-10", "vote2-c-20", "vote2-c-30", "vote2-c-40", "vote2-c-50", "vote2-c-60", "vote2-c-70", 'vote2-c-80', 'vote2-c-90', 'vote2-c-100']
     # agg_method_names = ['cset-c']
     dss = ["mrpc", "qnli", "sst2", "qqp", "cola", "mnli", "rte", "stsb"]
+
+    process_ndr_table(base_path, tasks=dss, with_row_id=False, custom_suffix = "-agga", 
+                      best_group_by=["infl", "agg"], 
+                    #   layers=selected_layers, 
+                      ndr_prefix="ndr_agga",
+                    #   agg_method_names=agg_method_names
+                      )
+    pass 
+
     draw_vote_k_ndr(
         base_path, 
         methods = ["hf","cos","datainf"],

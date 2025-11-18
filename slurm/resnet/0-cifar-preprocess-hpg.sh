@@ -2,13 +2,13 @@
 #SBATCH --job-name=cifar-prep
 #SBATCH --output cifar-%j.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl
-#SBATCH -p hpg-ai # run on partition general
+#SBATCH -p hpg-b200 # run on partition general
 #SBATCH --open-mode=append
 #SBATCH --gpus=1 # 1 GPU
 #SBATCH --array=0-0
 
-module load conda/24.7.1
-conda activate /home/dvitel.usf/torch-env
+module load conda
+conda activate /blue/anshumanc.usf/nn-infl/nn-infl-env
 
 #datasets=("cifar10" "cifar100")
 datasets=("cifar10")

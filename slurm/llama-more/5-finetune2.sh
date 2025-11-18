@@ -3,13 +3,13 @@
 #SBATCH --time=96:00:00
 #SBATCH --output 5-tun2-%a.out
 #SBATCH -D /blue/anshumanc.usf/nn-infl/llama-more
-#SBATCH -p hpg-ai
+#SBATCH -p hpg-b200
 #SBATCH --gpus=1 # 1 GPU
 #SBATCH --mem=16G # default 4GB
 #SBATCH --array=0-7
 
-module load conda/24.7.1
-conda activate /home/dvitel.usf/torch-env
+module load conda
+conda activate /blue/anshumanc.usf/nn-infl/nn-infl-env
 
 tasks=("qnli" "mrpc" "sst2" "qqp" "cola" "mnli" "rte" "stsb")
 
