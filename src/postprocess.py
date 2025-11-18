@@ -444,27 +444,27 @@ def cset_matrix_score(int_matrix: torch.Tensor, *, correct_infl_preds, vote_rati
     scores = 1.0 - votes / total_int_matrix.shape[-1]
     return scores
 
-def maj_matrix_score(int_matrix: torch.Tensor, *, vote_ratio = 0.5, noise_ratio = 0.3, **_) -> torch.Tensor:    
-    ''' 3-D tensor: train sample * module * infl sample '''
-    total_int_matrix = int_matrix.view(int_matrix.shape[0], -1)
-    votes = torch.zeros(int_matrix.shape[0], dtype = torch.float, device = total_int_matrix.device)
-    vote_threshold = int(total_int_matrix.shape[-1] * vote_ratio)
-    noise_size = int(noise_ratio * total_int_matrix.shape[0])
-    test_ids_ordered = total_int_matrix.argsort(dim=0)
-    voters = torch.zeros(total_int_matrix.shape[-1], dtype = torch.int64, device = total_int_matrix.device)
-    voter_ids = torch.arange(total_int_matrix.shape[-1], device = total_int_matrix.device)
-    while True:
-        cur_test_ids = torch.gather(test_ids_ordered, 0, voters.unsqueeze(0)).view(-1)
-        min_val_voter_id = torch.argmin(total_int_matrix[cur_test_ids, voter_ids])
-        cur_test_id = test_ids_ordered[voters[min_val_voter_id]]
-        votes[cur_test_id] += 1
-        voters[min_val_voter_id] += 1
-        enough_votes = torch.sum(votes >= vote_threshold)
-        if enough_votes >= noise_size:
-            break
-    scores = 1.0 - votes / total_int_matrix.shape[-1]
-    del test_ids_ordered, voters, voter_ids
-    return scores
+# def maj_matrix_score(int_matrix: torch.Tensor, *, vote_ratio = 0.5, noise_ratio = 0.3, **_) -> torch.Tensor:    
+#     ''' 3-D tensor: train sample * module * infl sample '''
+#     total_int_matrix = int_matrix.view(int_matrix.shape[0], -1)
+#     votes = torch.zeros(int_matrix.shape[0], dtype = torch.float, device = total_int_matrix.device)
+#     vote_threshold = int(total_int_matrix.shape[-1] * vote_ratio)
+#     noise_size = int(noise_ratio * total_int_matrix.shape[0])
+#     test_ids_ordered = total_int_matrix.argsort(dim=0)
+#     voters = torch.zeros(total_int_matrix.shape[-1], dtype = torch.int64, device = total_int_matrix.device)
+#     voter_ids = torch.arange(total_int_matrix.shape[-1], device = total_int_matrix.device)
+#     while True:
+#         cur_test_ids = torch.gather(test_ids_ordered, 0, voters.unsqueeze(0)).view(-1)
+#         min_val_voter_id = torch.argmin(total_int_matrix[cur_test_ids, voter_ids])
+#         cur_test_id = test_ids_ordered[voters[min_val_voter_id]]
+#         votes[cur_test_id] += 1
+#         voters[min_val_voter_id] += 1
+#         enough_votes = torch.sum(votes >= vote_threshold)
+#         if enough_votes >= noise_size:
+#             break
+#     scores = 1.0 - votes / total_int_matrix.shape[-1]
+#     del test_ids_ordered, voters, voter_ids
+#     return scores
 
 # def get_pareto_front_indexes_neg(int_matrix: torch.Tensor) -> np.ndarray:
 #     ''' Get the pareto front from a population. 
@@ -1980,7 +1980,7 @@ agg_methods = {
 
 
     "median": median_matrix_score,
-    "maj": maj_matrix_score,
+    # "maj": maj_matrix_score,
     # "cset": cset_matrix_score,
     # "cset-c": partial(cset_matrix_score, use_correct = True),
     # "cset-2": partial(cset_matrix_score, both_sides = True),
