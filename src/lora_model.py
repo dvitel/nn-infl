@@ -19,7 +19,7 @@ from transformers import (
 from peft import (
     LoraConfig,
     PeftModel,
-    get_peft_model, AutoPeftModelForCausalLM
+    get_peft_model, AutoPeftModelForCausalLM, AutoPeftModelForSequenceClassification
 )
 from datasets import Dataset
 import evaluate
@@ -166,13 +166,13 @@ def load_pretrained_LORA_model(model_name_or_path, unfreeze_modules_regex: Optio
     '''
     This function loads a pre-trained model.
     '''
-    base_model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path,
+    # AutoModelForSequenceClassification
+    model = AutoPeftModelForSequenceClassification.from_pretrained(model_name_or_path,
                                                                     return_dict=True,
                                                                     dtype = torch.bfloat16,
                                                                     offload_folder = os.path.join(os.environ['HF_HOME'], ".offload"),
-                                                                    offload_state_dict = True)                                                                    
-    base_model.config.use_cache = False
-    model = PeftModel.from_pretrained(base_model, model_name_or_path, is_trainable=True)
+                                                                    offload_state_dict = True,
+                                                                    is_trainable=True)
     # if os.path.exists(f"{model_name_or_path}/emb.pt"):
     emb_params = torch.load(f"{model_name_or_path}/emb.pt")
     embeddings = emb_params.pop('weight')
