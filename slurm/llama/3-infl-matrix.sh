@@ -17,27 +17,86 @@ task=${tasks[$SLURM_ARRAY_TASK_ID]}
 
 task_cwd=/blue/anshumanc.usf/nn-infl/llama/$task
 
+method_name=datainf
 mem_koef=2.0
 
 for run_id in {0..9}; do
 
-    echo "Infl matrix $task $run_id"
+    echo "Infl matrix $task $run_id $method_name"
     HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
-        /home/dvitel.usf/nn-infl/src/exp.py infl-matrix --task=$task --methods=datainf,cos,hf,outlier \
+        /home/dvitel.usf/nn-infl/src/exp.py infl-matrix --task=$task --methods=$method_name \
         --mem-koef=$mem_koef --m-prefix=m_bl --i-prefix=i_bl
-    echo "----- Done $task $run_id"
+    echo "----- Done $task $run_id $method_name"
     echo "----------------------------------"
 
 done
 
+method_name=cos
+mem_koef=1.1
+
+for run_id in {0..9}; do
+
+    echo "Infl matrix $task $run_id $method_name"
+    HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
+        /home/dvitel.usf/nn-infl/src/exp.py infl-matrix --task=$task --methods=$method_name --mem-koef=$mem_koef \
+        --m-prefix=m_bl --i-prefix=i_bl
+    echo "----- Done $task $run_id $method_name"
+    echo "----------------------------------"
+
+done
+
+method_name=hf
+mem_koef=1.1
+
+for run_id in {0..9}; do
+
+    echo "Infl matrix $task $run_id $method_name"
+    HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
+        /home/dvitel.usf/nn-infl/src/exp.py infl-matrix --task=$task --methods=$method_name \
+        --mem-koef=$mem_koef --m-prefix=m_bl --i-prefix=i_bl
+    echo "----- Done $task $run_id $method_name"
+    echo "----------------------------------"
+
+done
+
+method_name=outlier
+mem_koef=1.1
+
+for run_id in {0..9}; do
+
+    echo "Infl matrix $task $run_id $method_name"
+    HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
+        /home/dvitel.usf/nn-infl/src/exp.py infl-matrix --task=$task --methods=$method_name \
+        --mem-koef=$mem_koef --m-prefix=m_bl --i-prefix=i_bl
+    echo "----- Done $task $run_id $method_name"
+    echo "----------------------------------"
+
+done
+
+
+method_name='hf_we_topk_10'
 mem_koef=2.2
 
 for run_id in {0..9}; do
 
-    echo "Infl matrix $task $run_id"
+    echo "Infl matrix $task $run_id $method_name"
     HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
-        /home/dvitel.usf/nn-infl/src/exp.py infl-matrix --task=$task --methods='hf_we_topk_10,hf_we_' \
+        /home/dvitel.usf/nn-infl/src/exp.py infl-matrix --task=$task --methods=$method_name \
         --mem-koef=$mem_koef --m-prefix=m_bl --i-prefix=i_bl
-    echo "----- Done $task $run_id"
+    echo "----- Done $task $run_id $method_name"
     echo "----------------------------------"
+done
+
+method_name='hf_we_'
+mem_koef=2.2
+
+for run_id in {0..9}; do
+
+    echo "Infl matrix $task $run_id $method_name"
+    HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
+        /home/dvitel.usf/nn-infl/src/exp.py infl-matrix --task=$task --methods=$method_name \
+        --mem-koef=$mem_koef --m-prefix=m_bl --i-prefix=i_bl
+    echo "----- Done $task $run_id $method_name"
+    echo "----------------------------------"
+
 done
