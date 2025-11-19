@@ -853,7 +853,7 @@ def matrix_datainf_fn(__: torch.Tensor, val_grad: torch.Tensor, train_grad: torc
 
 from sklearn.svm import OneClassSVM
 def outlier_fn(int_view: torch.Tensor, val_grad: torch.Tensor, train_grad: torch.Tensor, *, 
-                detector_fn = OneClassSVM, full_val_size, autoregressive=True, **_) -> None:
+                detector_fn = OneClassSVM, full_val_size, val_classes: np.ndarray, **_) -> None:
 
     assert full_val_size == val_grad.shape[0], f"To fit grad region we need all validation gradients. Given {val_grad.shape[0]}, total {full_val_size}"
     val_grad_flat = val_grad.view(val_grad.shape[0], -1)
@@ -863,23 +863,16 @@ def outlier_fn(int_view: torch.Tensor, val_grad: torch.Tensor, train_grad: torch
     train_grad_flat_tmp = train_grad_flat.float()
     train_grad_np = train_grad_flat_tmp.cpu().numpy()
     # quick hack - in rereality we need to pass to influence the groups of validation samples that we consider to be coaligned in grad space intuitivelly same label
-    if autoregressive: # 10 groups of 
-        n_class = 10
-        n_val_per_class = 10
-        for i_class in range(n_class):
-            class_val_grad_np = val_grad_np[i_class * n_val_per_class:(i_class + 1) * n_val_per_class]
-            detector = detector_fn()
-            detector.fit(class_val_grad_np)
-            scores = detector.decision_function(train_grad_np)
-            scores_tmp = torch.tensor(scores, device=int_view.device, dtype=int_view.dtype)
-            int_view[i_class * n_val_per_class:(i_class + 1) * n_val_per_class] = scores_tmp            
-            pass
-    else:
+    unique_val_classes = np.unique(val_classes)
+    for i_class in unique_val_classes:
+        class_ids = np.where(val_classes == i_class)[0]
+        class_val_grad_np = val_grad_np[class_ids]
         detector = detector_fn()
-        detector.fit(val_grad_np)
+        detector.fit(class_val_grad_np)
         scores = detector.decision_function(train_grad_np)
         scores_tmp = torch.tensor(scores, device=int_view.device, dtype=int_view.dtype)
-        int_view[:] = scores_tmp
+        int_view[class_ids] = scores_tmp            
+        pass
     del val_grad_flat, train_grad_flat, val_grad_flat_tmp, train_grad_flat_tmp, scores_tmp
     pass 
 
@@ -1079,9 +1072,11 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
 
     valset = datasets['infl']#.select(range(100))
 
+    common_tokens_time=0
     common_tokens = {}
 
     if any('_we_' in method_name for method_name in method_names):
+        start_common_tokens_time = time.perf_counter()
         common_tokens_ds = os.path.join(cwd, f'common_tokens_{task}_{seed}.pkl')
         should_recompute = False
         try:
@@ -1110,6 +1105,8 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
                     common_tokens[(train_id, val_id)] = {token_id: (train_token_count[token_id], val_token_count[token_id]) for token_id in common_token_ids}
             with open(common_tokens_ds, 'wb') as file:
                 pickle.dump(common_tokens, file)
+        end_common_tokens_time = time.perf_counter()
+        common_tokens_time = end_common_tokens_time - start_common_tokens_time
 
     methods_without_we = ['datainf', 'datainf0', 'outlier' ]
     interaction_matrices = {method_name: {module_name: torch.zeros((len(valset), len(trainset)), dtype=torch.bfloat16, device=device)                                             
@@ -1143,6 +1140,7 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
             val_grads = None
 
             for val_shift, cur_val_dataset, train_shift, cur_train_dataset in tqdm(train_val_splits): 
+                cur_val_dataset_labels = np.array(cur_val_dataset['labels'])
                 if train_shift == 0:
                     if val_grads is not None:
                         del val_grads
@@ -1168,7 +1166,7 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
                                     module_name = module_name, infl_context = infl_contexts[method_name],
                                     train_shift=train_shift, val_shift=val_shift, 
                                     full_train_size=len(trainset), full_val_size=len(valset),
-                                    common_tokens=common_tokens)
+                                    common_tokens=common_tokens, val_classes = cur_val_dataset_labels)
                     end_infl_time = time.perf_counter()
                     method_times.setdefault(method_name, 0)
                     method_times[method_name] += end_infl_time - start_infl_time
@@ -1191,6 +1189,8 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
         infl_path = os.path.join(cwd, f'{i_prefix}_{method_name}_{task}_{seed}.pt')
         torch.save(infl_matrices, infl_path)
 
+    if common_tokens_time > 0:
+        print(f"Common tokens computation time: {common_tokens_time:.5f} seconds")
     print(f"Total gradient computation time: {grad_total_time:.5f} seconds")
     for method_name, method_time in method_times.items():
         print(f"Total influence computation time for method {method_name}: {method_time:.5f} seconds")
@@ -1231,62 +1231,14 @@ def infl_matrix_causal(task='sentense',
 
     collator = DataCollatorWithPadding(tokenizer=tokenizer, padding="longest", return_tensors="pt")  
 
-    # torch.backends.cuda.enable_mem_efficient_sdp(False)
-    # torch.backends.cuda.enable_flash_sdp(False)
-
-    # module_filter = ['lora_A', 'lora_B', 'modules_to_save.default.out_proj.weight']
-    # # module_filter = ['modules_to_save.default.out_proj.weight']
-    # for param_name, param_param in lora_model.named_parameters():
-    #     if any([module in param_name for module in module_filter]):
-    #         param_param.requires_grad = True
-    #     else:
-    #         param_param.requires_grad = False
-
     active_modules = [(name, param.numel() * (torch.finfo(param.dtype).bits // 8), param) for name, param in lora_model.named_parameters() if param.requires_grad]
     active_modules.sort(key=lambda x: x[1], reverse=True)
 
-    # dataset_path = os.path.join(cwd, f'd_{task}_{seed}')
-
-    # tokenizer = load_tokenizer(config['tokenizer_name'])
-    # collator = DataCollatorWithPadding(tokenizer=tokenizer, padding="longest", return_tensors="pt")  
-
-    # method_fn = matrix_infl_methods[method]
     method_names = [name for name in methods.split(',') if name in matrix_infl_methods]
 
-    trainset = datasets['train']#.select(range(100))
-    valset = datasets['validation']#.select(range(100))
-
-    common_tokens = {}
-
-    # if any('_we_' in method_name for method_name in method_names):
-    #     common_tokens_ds = os.path.join(cwd, f'common_tokens_{task}_{seed}.pkl')
-    #     should_recompute = False
-    #     try:
-    #         with open(common_tokens_ds, 'rb') as file:
-    #             common_tokens = pickle.load(file)
-    #     except:
-    #         should_recompute = True
-    #     if should_recompute:
-    #         # need to compute common tokens         
-    #         vocab_remap = lora_model.get_input_embeddings().vocab_mapping.tolist()
-    #         train_token_counts = {}
-    #         for train_id in range(len(trainset)):
-    #             cur_train_token_counts = train_token_counts.setdefault(train_id, {})
-    #             for token_id in trainset[train_id]['input_ids']:
-    #                 remapped_token_id = vocab_remap[token_id]
-    #                 cur_train_token_counts[remapped_token_id] = cur_train_token_counts.get(remapped_token_id, 0) + 1
-    #         val_token_counts = {}
-    #         for val_id in range(len(valset)):
-    #             cur_val_token_counts = val_token_counts.setdefault(val_id, {})
-    #             for token_id in valset[val_id]['input_ids']:
-    #                 remapped_token_id = vocab_remap[token_id]
-    #                 cur_val_token_counts[remapped_token_id] = cur_val_token_counts.get(remapped_token_id, 0) + 1
-    #         for train_id, train_token_count in train_token_counts.items():
-    #             for val_id, val_token_count in val_token_counts.items():
-    #                 common_token_ids = set(train_token_count.keys()).intersection(val_token_count.keys())
-    #                 common_tokens[(train_id, val_id)] = {token_id: (train_token_count[token_id], val_token_count[token_id]) for token_id in common_token_ids}
-    #         with open(common_tokens_ds, 'wb') as file:
-    #             pickle.dump(common_tokens, file)
+    trainset = datasets['train']#.select(range(20))
+    valset = datasets['validation']#.select(range(20))
+    valsetgroups = np.arange(len(valset)) // 10 # 10 per group
 
     methods_without_we = ['datainf', 'datainf0', 'outlier' ] #'kronfl' ]
     interaction_matrices = {method_name: {module_name: torch.zeros((len(valset), len(trainset)), dtype=torch.bfloat16, device=device)                                             
@@ -1339,7 +1291,7 @@ def infl_matrix_causal(task='sentense',
                                     module_name = module_name, infl_context = infl_contexts[method_name],
                                     train_shift=train_shift, val_shift=val_shift, 
                                     full_train_size=len(trainset), full_val_size=len(valset),
-                                    common_tokens=common_tokens, autoregressive=True)
+                                    val_classes=valsetgroups)
                 del train_grads
                 torch.cuda.empty_cache() 
             if val_grads is not None:
@@ -1355,11 +1307,6 @@ def infl_matrix_causal(task='sentense',
         infl_path = os.path.join(cwd, f'{i_prefix}_{method_name}_{task}_{seed}.pt')
         print(f"Saving {infl_path}...")
         torch.save(infl_matrices, infl_path)
-
-    # with open(config_path, 'w') as file:
-    #     fcntl.flock(file, fcntl.LOCK_EX)
-    #     json.dump(config, file)
-    #     fcntl.flock(file, fcntl.LOCK_UN)    
 
 class KronfluenceTask(Task):
     def __init__(self, model: torch.nn.Module, autoregressive: bool = False, device: str = "cuda",

@@ -322,7 +322,7 @@
             "program": "src/exp.py",
             "console": "integratedTerminal",
             "args": [
-                "infl-matrix", "--task=qnli", "--methods=hf", "--mem-koef=1.1", "--m-prefix=m_bl", "--i-prefix=i_bl"
+                "infl-matrix", "--task=qnli", "--methods=outlier", "--mem-koef=1.1", "--m-prefix=m_bl", "--i-prefix=i_bl"
             ],
             "env": {
                 "INFL_SEED": "42",
@@ -338,7 +338,7 @@
             "args": [
                 "infl-matrix-causal", 
                 "--task=sentense", 
-                "--methods=hf,cos,datainf,outlier", 
+                "--methods=outlier", 
                 "--mem-koef=1.1", 
                 "--checkpoint=checkpoint", 
                 "--dataset=grammars",
