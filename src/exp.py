@@ -39,6 +39,8 @@ from kronfluence.utils.common.factor_arguments import all_low_precision_factor_a
 from kronfluence.utils.common.score_arguments import all_low_precision_score_arguments
 from kronfluence.utils.dataset import DataLoaderKwargs
 
+import time
+
 if torch.cuda.is_available():
     torch.cuda.init()
 
@@ -1124,6 +1126,9 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
     force_val_size_for_methods = ['outlier']
     force_val_size = any(method_name in force_val_size_for_methods for method_name in method_names)
 
+    grad_total_time = 0
+    method_times = {}
+
     while len(all_active_modules) > 0:
         selected_module_count, train_size, test_size = pick_modules_and_split_size(
             all_active_modules, len(trainset), len(valset), method_memory_koef=mem_koef, 
@@ -1143,11 +1148,18 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
                         del val_grads
                     val_grads = cur_params.alloc_grads(len(cur_val_dataset))
                     val_dataloader = get_infl_loader(cur_val_dataset, collator)
+                    start_grad_time = time.perf_counter()
                     set_grad_values(val_grads, lora_model, cur_params.get_cur_params(), val_dataloader, device=device)
+                    end_grad_time = time.perf_counter()
+                    grad_total_time += end_grad_time - start_grad_time
                 train_grads = cur_params.alloc_grads(len(cur_train_dataset))
                 train_dataloader = get_infl_loader(cur_train_dataset, collator)
+                start_grad_time = time.perf_counter()
                 set_grad_values(train_grads, lora_model, cur_params.get_cur_params(), train_dataloader, device=device)
+                end_grad_time = time.perf_counter()
+                grad_total_time += end_grad_time - start_grad_time
                 for method_name, module_int_matrices in interaction_matrices.items():
+                    start_infl_time = time.perf_counter()
                     for cur_module_id, module_name in cur_params.enumerate_names():
                         if module_name in module_int_matrices:
                             cur_int_matrix_view = module_int_matrices[module_name][val_shift:val_shift + len(cur_val_dataset), train_shift:train_shift + len(cur_train_dataset)]
@@ -1157,20 +1169,33 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
                                     train_shift=train_shift, val_shift=val_shift, 
                                     full_train_size=len(trainset), full_val_size=len(valset),
                                     common_tokens=common_tokens)
+                    end_infl_time = time.perf_counter()
+                    method_times.setdefault(method_name, 0)
+                    method_times[method_name] += end_infl_time - start_infl_time
                 del train_grads
                 torch.cuda.empty_cache() 
             if val_grads is not None:
                 del val_grads
             for method_name, method_infl_context in infl_contexts.items():
                 if 'continuation' in method_infl_context:
+                    start_infl_time = time.perf_counter()
                     cur_int_matrices = interaction_matrices[method_name]
                     method_infl_context['continuation'](cur_int_matrices, **method_infl_context)
+                    end_infl_time = time.perf_counter()
+                    method_times.setdefault(method_name, 0)
+                    method_times[method_name] += end_infl_time - start_infl_time
         pass 
 
 
     for method_name, infl_matrices in interaction_matrices.items():
         infl_path = os.path.join(cwd, f'{i_prefix}_{method_name}_{task}_{seed}.pt')
         torch.save(infl_matrices, infl_path)
+
+    print(f"Total gradient computation time: {grad_total_time:.5f} seconds")
+    for method_name, method_time in method_times.items():
+        print(f"Total influence computation time for method {method_name}: {method_time:.5f} seconds")
+
+    pass
 
     # with open(config_path, 'w') as file:
     #     fcntl.flock(file, fcntl.LOCK_EX)
