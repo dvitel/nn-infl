@@ -1026,7 +1026,7 @@ def set_logits(task = "qnli", m_prefix: str = 'm_bl', batch_size=32, device = "c
 
 # Mem koef NOTE: hf (1.1, 0.3), hf_we_ (2, 0.3), hf_we_topk (2, 0.3), cos (1.1, 0.3), cov (2, 0.3), datainf_one (1.1, 0.3), datainf (2, 0.3), 
 def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datainf_one,datainf", mem_koef: float = 2.0, mem_delta: float = 0.3,
-                i_prefix='i_bl', m_prefix='m_bl'):
+                i_prefix='i_bl', m_prefix='m_bl', times_file="infl-times.csv"):
     config_path = os.path.join(cwd, f'c_{task}_{seed}.json')
     with open(config_path, 'r') as file:
         config = json.load(file)
@@ -1195,12 +1195,16 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
     for method_name, method_time in method_times.items():
         print(f"Total influence computation time for method {method_name}: {method_time:.5f} seconds")
 
-    pass
+    if times_file != '':
+        times_path = os.path.join(cwd, times_file)
+        with open(times_path, 'a') as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            for method_name, method_time in method_times.items():
+                f.write(f'{task},{method_name},{seed},{common_tokens_time:.5f},{grad_total_time:.5f},{method_time:.5f}\n')
+            f.flush()
+            fcntl.flock(f, fcntl.LOCK_UN)
 
-    # with open(config_path, 'w') as file:
-    #     fcntl.flock(file, fcntl.LOCK_EX)
-    #     json.dump(config, file)
-    #     fcntl.flock(file, fcntl.LOCK_UN)    
+    pass
 
 
 def infl_matrix_causal(task='sentense', 
