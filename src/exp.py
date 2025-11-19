@@ -1206,6 +1206,122 @@ def infl_matrix(task = 'mrpc', methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datain
 
     pass
 
+def extract_qv(name: str) -> str:
+    if ".q_proj" in name or ".query." in name:
+        return "q"
+    elif ".v_proj" in name or ".value." in name:
+        return "v"
+    return ""
+
+def extract_module(name: str) -> str: # either lora A or B
+    if "lora_A" in name:
+        return f"A {extract_qv(name)}"
+    elif "lora_B" in name:
+        return f"B {extract_qv(name)}"
+    elif (".classifier." in name) or (name == 'classifier'):
+        return "CL"
+    elif (".word_embeddings." in name) or (name == 'word_embeddings'):
+        return "WE"
+    raise ValueError(f"Unknown module name {name}")
+
+def extract_layer(name:str) -> int: # numeric
+    name_parts = name.split('.')
+    loc_of_layer = name_parts.index("layers") if "layers" in name_parts else -1
+    if loc_of_layer < 0:
+        loc_of_layer = name_parts.index("layer") if "layer" in name_parts else -1
+    if loc_of_layer > 0 and loc_of_layer + 1 < len(name_parts):
+        layer = name_parts[loc_of_layer + 1]
+        return int(layer)
+    raise ValueError(f"Unknown layer {name}")
+
+def infl_ranks(tasks = 'qnli,mrpc', 
+               methods = "hf,hf_we_,hw_we_topk_10,cos,cov,datainf_one,datainf", 
+               seeds="0,1,2,3,4,5,6,7,8,9",
+               i_prefix='i_bl',
+               device='cuda',
+               num_layers: int = 16
+               ):
+    ''' In groups of noise/benign computes most influential training samples according to avg ranks over layers,
+        and then records how ranks of these samples vary from layer to layer. 
+        Also, does same with ``avg'' noise/benign samples 
+    '''
+
+    tasks = tasks.split(',')
+    methods = methods.split(',')
+    seeds = [int(s) for s in seeds.split(',')]
+
+    layer_columns = list(range(num_layers + 2))
+    df = pd.DataFrame(columns=['task', 'method', 'seed', 'sample_type', *layer_columns])
+    df = df.set_index(['task', 'method', 'seed', 'sample_type'])
+
+    for task in tasks:
+        for seed in seeds:
+            dataset_path = os.path.join(cwd, task, f'd_{task}_{seed}')
+
+            datasets = load_from_disk(dataset_path) # add validation dataset 
+
+            trainset = datasets['train']
+            noise_mask = np.array(trainset['noise']) == 1
+            noise_ids = np.where(noise_mask)[0].tolist()
+            benign_ids = np.where(~noise_mask)[0].tolist()
+
+            for method in methods:
+                infl_score_path = os.path.join(cwd, task, f"{i_prefix}_{method}_{task}_{seed}.pt")
+                infl_scores = torch.load(infl_score_path)
+                per_layer_counts = {}
+                per_layer_rank_sums = {}
+                for module_name, module_scores in infl_scores.items():
+                    module_type = extract_module(module_name)
+                    if module_type == "WE":
+                        module_layer = 0
+                    elif module_type == "CL":
+                        module_layer = num_layers + 1
+                    else:
+                        module_layer = extract_layer(module_name) + 1
+                    module_scores_t = module_scores.t() # IMPORTANT all aggs accepts train samples in rows
+                    ranks_sum = rank_matrix_score(module_scores_t, rank_score_fn = lambda x, **_: torch.sum(x, dim=-1))
+                    per_layer_counts[module_layer] = per_layer_counts.get(module_layer, 0) + module_scores_t.numel() / module_scores_t.shape[0]
+                    if module_layer not in per_layer_rank_sums:
+                        per_layer_rank_sums[module_layer] = ranks_sum
+                    else:
+                        per_layer_rank_sums[module_layer] += ranks_sum
+                        del ranks_sum
+                    pass
+                total_counts = sum(per_layer_counts.values())
+                total_rank_sums = None
+                for v in per_layer_rank_sums.values():
+                    if total_rank_sums is None:
+                        total_rank_sums = v
+                    else:
+                        total_rank_sums += v
+                global_avg_ranks = total_rank_sums / total_counts
+                gloabl_noise_ranks = global_avg_ranks[noise_ids]
+                most_infl_noise_id_id = torch.argmin(gloabl_noise_ranks).item()
+                most_infl_noise_id = noise_ids[most_infl_noise_id_id].item()
+                gloabl_benign_ranks = global_avg_ranks[benign_ids]
+                most_infl_benign_id_id = torch.argmin(gloabl_benign_ranks).item()
+                most_infl_benign_id = benign_ids[most_infl_benign_id_id].item()        
+                res = {"top_noise": [0] * (num_layers + 2),
+                    "top_benign": [0] * (num_layers + 2),
+                    "avg_noise": [0] * (num_layers + 2),
+                    "avg_benign": [0] * (num_layers + 2)}
+                for layer_id, layer_rank_sums in per_layer_rank_sums.items():
+                    layer_avg_ranks = layer_rank_sums / per_layer_counts[layer_id]
+                    most_infl_noise_rank = layer_avg_ranks[most_infl_noise_id].item()
+                    most_infl_benign_rank = layer_avg_ranks[most_infl_benign_id].item()
+                    avg_noise_rank = torch.mean(layer_avg_ranks[noise_ids]).item()
+                    avg_benign_rank = torch.mean(layer_avg_ranks[benign_ids]).item()
+                    res["top_noise"][layer_id] = most_infl_noise_rank
+                    res["top_benign"][layer_id] = most_infl_benign_rank
+                    res["avg_noise"][layer_id] = avg_noise_rank
+                    res["avg_benign"][layer_id] = avg_benign_rank
+                    
+                for k, v in res.items():
+                    df.loc[(task, method, seed, k)] = v
+    ranks_path = os.path.join(cwd, f"infl_layer_ranks.csv")
+    df.to_csv(ranks_path)
+
+    pass    
 
 def infl_matrix_causal(task='sentense', 
                        methods="hf,hf_we_,hw_we_topk_10,cos,cov,datainf_one,datainf", 
@@ -1753,27 +1869,6 @@ def auc_recall(task = "sentense", infl_methods: str = 'hf,cos,datainf,outlier,kr
     n_sample_per_class = 90 
     n_class = 10
 
-    def extract_qv(name: str) -> str:
-        if ".q_proj" in name:
-            return "q"
-        elif ".v_proj" in name:
-            return "v"
-        raise ValueError(f"Unknown module name {name}")
-
-    def extract_module(name: str) -> str: # either lora A or B
-        if "lora_A" in name:
-            return "A"
-        elif "lora_B" in name:
-            return "B"
-        raise ValueError(f"Unknown module name {name}")
-    
-    def extract_layer(name:str) -> int: # numeric
-        name_parts = name.split('.')
-        loc_of_layer = name_parts.index("layers")
-        if loc_of_layer > 0 and loc_of_layer + 1 < len(name_parts):
-            layer = name_parts[loc_of_layer + 1]
-            return int(layer)
-        raise ValueError(f"Unknown layer {name}")
 
     metrics = []
     for seed in seeds:
@@ -1787,7 +1882,7 @@ def auc_recall(task = "sentense", infl_methods: str = 'hf,cos,datainf,outlier,kr
                     module_type = ''
                     layer = int(module_name)
                 else:
-                    module_type = f"{extract_module(module_name)} {extract_qv(module_name)}"
+                    module_type = extract_module(module_name)
                     layer = extract_layer(module_name)
                 # aucs = []
                 # recalls = []
@@ -2061,7 +2156,7 @@ def finetune2(task = 'qnli',
 parser = argh.ArghParser()
 parser.add_commands([preprocess, init_checkpoint, finetune, grads, infl, infl_matrix, scores, 
                      ndr, finetune2, infl_noise, set_logits, cancel_eff, combine_cancel,
-                     infl_matrix_causal, kronfl, auc_recall, repsim])
+                     infl_matrix_causal, kronfl, auc_recall, repsim, infl_ranks])
 
 def test_infl_vs_infl_matrix(file1: str, file2: str):
     infl = torch.load(file1)

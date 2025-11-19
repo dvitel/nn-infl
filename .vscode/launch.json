@@ -227,22 +227,7 @@
                 "INFL_SEED": "42",
                 "INFL_CWD": "./data/dev"
             }
-        },             
-        {
-            "name": "Infl matrix: ResNet34 on CIFAR10",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "src/exp_resnet.py",
-            "console": "integratedTerminal",
-            "stopOnEntry": false,
-            "args": [
-                "infl-matrix", "--dataset-name=cifar10", "--model-name=resnet34", "--method=cov", "--size-koef=0.8"
-            ],
-            "env": {
-                "INFL_SEED": "42",
-                "INFL_CWD": "./data/dev"
-            }
-        },                             
+        },                                      
         {
             "name": "Finetune: GLUE QNLI on DistilRoberta",
             "type": "debugpy",
@@ -433,7 +418,22 @@
                 "INFL_SEED": "42",
                 "INFL_CWD": "./data/roberta"
             }
-        },          
+        },   
+        {
+            "name": "Infl ranks QNLI",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/exp.py",
+            "console": "integratedTerminal",
+            "args": [
+                "infl-ranks", "--tasks=qnli", "--methods=hf", "--seeds=42", 
+                "--i-prefix=i_bl", "--num-layers=6"
+            ],
+            "env": {
+                "INFL_SEED": "42",
+                "INFL_CWD": "./data/dev/roberta"
+            }
+        },                    
         {
             "name": "Scores: GLUE QNLI on DistilRoberta",
             "type": "debugpy",
