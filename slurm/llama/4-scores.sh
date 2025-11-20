@@ -17,12 +17,12 @@ task=${tasks[$SLURM_ARRAY_TASK_ID]}
 
 task_cwd=/blue/anshumanc.usf/nn-infl/llama/$task
 
-for run_id in {0..4}; do
+for run_id in {0..9}; do
     echo "Scores $task $run_id"
     HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
         /home/dvitel.usf/nn-infl/src/exp.py scores --task=$task \
-        --infl-methods=datainf,cos,hf,hf_we_,hf_we_topk_10,rand,denoise \
-        --agg-methods=mean,mean-c,rank,rank-c,vote2,vote2-c \
+        --infl-methods=hf,cos,datainf,outlier \
+        --agg-methods=mean,rank-c,vote2-c \
         --m-prefix=m_bl --i-prefix=i_bl --s-prefix=s_bl \
         --group-file=../groups.json
 
