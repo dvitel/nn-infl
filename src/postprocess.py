@@ -31,7 +31,7 @@ matplotlib.rcParams['pdf.fonttype'] = 42
 matplotlib.rcParams['ps.fonttype'] = 42
 matplotlib.rcParams['font.family'] = ['Times']    
 
-benchmark = ["qnli", "mrpc", "sst2", "cola", "qqp", "mnli", "rte", "stsb"]
+benchmark = ["qnli", "mrpc", "sst2", "qqp", "cola", "mnli", "rte", "stsb"]
 
 # from cifar import DatasetSplits
 
@@ -574,7 +574,7 @@ def max_matrix_score(int_matrix: torch.Tensor, **_) -> torch.Tensor:
     return scores
 
 def rank_matrix_score(int_matrix: torch.Tensor, *, 
-                        use_correct = None, correct_infl_preds, 
+                        use_correct = None, correct_infl_preds = None, 
                         chunk_size = 10000, rank_score_fn = mean_matrix_score, **_):
     ''' 3-D tensor: train sample * module * infl sample '''
     if use_correct is not None:
@@ -1634,18 +1634,21 @@ def create_tun2_agg_metrics_table(metric_name: str = "best_accuracy_1", prec = 1
                         out_folder = "data/roberta", datasets = benchmark,
                         highlight_max = True, ds_ranks = False, mul = 100,
                         run_ids = [0,1,2,3,4,5,6,7,8,9], agg_metrics = {"mean": "Mean", "rank-c": "Rank", "vote2-c": "Vote"},
-                        res_suffix = "all"): 
+                        res_suffix = "all", with_ints = False): 
     ''' Like create_tun2_metric_table, but for many agg metrics '''
 
     all_df = get_all_df(base_path = out_folder, datasets = datasets,
                             res_suffix = res_suffix, keep_only=[metric_name])
     
-    int_df_path = os.path.join(out_folder, "metrics", f"intranks-{metric_name}.pcl")
-    int_df = pd.read_pickle(int_df_path)
-    int_df.reset_index(inplace=True)
-    int_df.drop(columns=["module"], inplace=True)
-    int_df.rename(columns={"infl": "infl_method", "agg": "agg_method", "layer": "module"}, inplace=True)
-    int_df.set_index(["infl_method", "agg_method", "module"], inplace=True)
+    if with_ints:
+        int_df_path = os.path.join(out_folder, "metrics", f"intranks-{metric_name}.pcl")
+        int_df = pd.read_pickle(int_df_path)
+        int_df.reset_index(inplace=True)
+        int_df.drop(columns=["module"], inplace=True)
+        int_df.rename(columns={"infl": "infl_method", "agg": "agg_method", "layer": "module"}, inplace=True)
+        int_df.set_index(["infl_method", "agg_method", "module"], inplace=True)
+    else:
+        int_df = None
 
     agg_method_keys = list(agg_metrics.keys())
     agg_method_keys.append('')
@@ -1676,12 +1679,13 @@ def create_tun2_agg_metrics_table(metric_name: str = "best_accuracy_1", prec = 1
     metric_by_ds_std = metrics_per_ds.groupby(level=0, axis=1).std()
     metric_by_ds_std.columns = [c + "_std" for c in metric_by_ds_std.columns]
     metric_by_ds = pd.merge(metric_by_ds_mean, metric_by_ds_std, left_index=True, right_index=True)
-    metric_by_ds['rank'] = int_df.loc[metric_by_ds.index]['rank']
-    metric_by_ds['win_rate'] = int_df.loc[metric_by_ds.index]['win_rate']
-    metric_by_ds['wstd'] = int_df.loc[metric_by_ds.index]['wstd']
-    metric_by_ds = metric_by_ds.sort_values(by=['rank', 'win_rate', 'wstd'], ascending=[True, False, True])
+    if with_ints:
+        metric_by_ds['rank'] = int_df.loc[metric_by_ds.index]['rank']
+        metric_by_ds['win_rate'] = int_df.loc[metric_by_ds.index]['win_rate']
+        metric_by_ds['wstd'] = int_df.loc[metric_by_ds.index]['wstd']
+        metric_by_ds = metric_by_ds.sort_values(by=['rank', 'win_rate', 'wstd'], ascending=[True, False, True])
 
-    metric_by_ds = metric_by_ds[["rank", "win_rate", "wstd", *[de for d in datasets for de in [d, d + "_std"]]]]
+        metric_by_ds = metric_by_ds[["rank", "win_rate", "wstd", *[de for d in datasets for de in [d, d + "_std"]]]]
     # metric_by_ds.to_csv(f"{out_folder}/{metric_name}{suffix}-avg.csv")
 
     filtered_df = metric_by_ds.loc[metric_by_ds.index.get_level_values('infl_method') != 'denoise']
@@ -1703,8 +1707,9 @@ def create_tun2_agg_metrics_table(metric_name: str = "best_accuracy_1", prec = 1
             agg_method = row["agg_method"]
             new_row["Agg"] = agg_metrics.get(agg_method, '')
         new_row["Layer"] = "all" if (method not in ["denoise", "rand"]) and layer == "" else layer 
-        new_row["Rank"] = row["rank"]
-        new_row["Win Rate"] = f"{row['win_rate']:.2f} {{\\footnotesize $\\pm$ {row['wstd']:.2f}}}"
+        if with_ints:
+            new_row["Rank"] = row["rank"]
+            new_row["Win Rate"] = f"{row['win_rate']:.2f} {{\\footnotesize $\\pm$ {row['wstd']:.2f}}}"
         for did, d in enumerate(datasets):
             should_highlight = False
             m = round(row[d] * (10 ** prec) * mul) / (10 ** prec)
@@ -4302,7 +4307,7 @@ def layer_ndr_metric_graphs(base_path: str, tasks=benchmark,
     '''
     orig_infl_names = list(infl_method_names)
 
-    cache_path = os.path.join(base_path, f"layer_ndr{suffix}.pcl")
+    cache_path = os.path.join(base_path, f"layer_ndr{suffix}2.pcl")
     if os.path.exists(cache_path):
         score_df = pd.read_pickle(cache_path) 
     else:
@@ -4683,12 +4688,129 @@ def auc_recall_metric_graphs(metrics: list[str],
                 bbox_to_anchor=(0.5, 0)  # Adjust position (centered below the grid)
         )        
     fig.tight_layout(w_pad=0, h_pad=0, pad=0, rect=[0, 0.03, 1, 1])
-    fig.savefig(os.path.join(out_dir, f"layers-{metric}-ds.pdf"))
+    fig.savefig(os.path.join(out_dir, f"layers-{metric}-ds-sm.pdf"))
+    plt.close(fig)
+    pass
+
+
+def draw_infl_ranks_variations(csv: str,
+                    datasets: list[str] = benchmark,
+                    methods: list[str] = ["hf", "cos", "datainf"],
+                    method_names: list[str] = ["TracIn", "Cosine", "DataInf"],
+                    sample_types: list[str] = ["top_noise", "avg_noise_median", "least_benign", "avg_benign_median"],
+                    sample_type_names: list[str] = ["Highest Noise", "Avg Noise", "Lowest Benign", "Avg Benign"],
+                    out_file="./infl-rank-variations.pdf",
+                    figsize = (8, 8)):
+
+
+    df = pd.read_csv(csv)
+    df = df.set_index(["task", "method", "sample_type", "seed"])
+    df.loc[pd.IndexSlice[:, "datainf", :, :], '0'] = np.nan
+    plt.ioff()
+    ordered_handles = []
+    ordered_labels = []    
+    fig, axes = plt.subplots(len(datasets), len(methods), figsize=figsize)
+    for i, dataset in enumerate(datasets):
+        dataset_name = dataset.upper()
+        dataset_df = df.loc[dataset]
+        min_y = np.nanmin(dataset_df.to_numpy())
+        max_y = np.nanmax(dataset_df.to_numpy())
+        for j, method in enumerate(methods):
+            method_name = method_names[j]
+            ax = axes[i,j] if len(datasets) > 1 else axes[j]
+            method_df = dataset_df.loc[method]
+            for k, sample_type in enumerate(sample_types):
+                sample_name = sample_type_names[k]
+                sample_df = method_df.loc[sample_type]
+                mean_conf = mean_confidence(sample_df)
+                xs = mean_conf['mean'].index.values.astype(int)
+                y_mean_values = mean_conf["mean"]
+                # if method_name == "avg_noise_median" or method_name == "avg_noise_mean":
+                #     sample_df_min = method_df.loc["avg_noise_min"]
+                #     mean_conf_min = mean_confidence(sample_df_min)
+                #     y_min_values = mean_conf_min["ci_low"]
+                #     sample_df_max = method_df.loc["avg_noise_max"]
+                #     mean_conf_max = mean_confidence(sample_df_max)
+                #     y_max_values = mean_conf_max["ci_high"]    
+                # # elif method_name == "avg_noise_mean":
+                # else:
+                y_min_values = None 
+                y_max_values = None
+                # else:
+                y_min_values = mean_conf["ci_low"]
+                y_max_values = mean_conf["ci_high"]
+
+                color = "gray"
+                linestyle = "--"
+                linewidth = 1
+                if "noise" in sample_type:
+                    color = "#FF1A1A"
+                    linewidth = 1
+                if "top_noise" in sample_type:
+                    color = "#CC0000"
+                if "least_noise" in sample_type:
+                    color = "#FF6666"
+                if "avg" in sample_type:
+                    linestyle = "-"
+
+                ln = ax.plot(xs, y_mean_values, label=sample_name, linewidth=linewidth, color=color, linestyle=linestyle)
+                if y_min_values is not None and y_max_values is not None:
+                    ax.fill_between(xs, y_min_values, y_max_values, color=ln[0].get_color(), alpha=0.1)
+
+                max_x = xs.max()
+                ax.set_xlim(0, max_x)
+                ax.set_ylim(min_y, max_y)
+
+                xticks = [x for x in xs if x % 3 == 0 or x == 1]  # always show layer 1 + every 3rd
+                xlabels = [str(x) for x in xticks]
+
+                ax.set_xticks(xticks)
+                ax.set_xticklabels(xlabels, fontsize=7, verticalalignment='center')
+                ax.tick_params(axis='x', length=1)
+                ax.tick_params(axis='y', pad=0, length=1)
+                ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{int(value)}"))            
+                if j == 0:
+                    ax.set_ylabel(dataset_name, fontsize=10, labelpad=0)
+                ax.tick_params(axis='y', labelsize=7)
+                if i == 0:
+                    ax.set_title(method_name, fontsize=10, pad=0)
+
+                if (i == 0) and (j == 0):
+                    ordered_handles.append(ln[0])
+                    ordered_labels.append(sample_name)
+                pass
+
+    fig.legend(ordered_handles, ordered_labels, loc='lower center', fontsize=8,
+                ncol=len(ordered_handles), borderaxespad = 0,  # Arrange all legend items in one row
+                bbox_to_anchor=(0.5, 0)  # Adjust position (centered below the grid)
+        )        
+    fig.tight_layout(w_pad=0, h_pad=0, pad=0, rect=[0, 0.03, 1, 1])
+    fig.savefig(out_file)
     plt.close(fig)
     pass
 
 
 if __name__ == "__main__":
+
+    # draw_infl_ranks_variations(
+    #     csv="./data/roberta/infl_layer_ranks-median.csv",
+    #     out_file="./data/roberta/infl-rank-variations-median.pdf",
+    #     # sample_types = ["top_noise", "avg_noise_median", "least_benign", "avg_benign_median"],
+    #     # sample_type_names = ["Highest Noise", "Avg Noise", "Lowest Benign", "Avg Benign"],
+    #     sample_types = ["avg_benign_mean", "avg_noise_mean", "top_noise" ],# "least_noise", , "top_benign", "least_benign"],
+    #     sample_type_names = [ "Avg Benign", "Avg Noise Rank", "Top Ranked Noise Sample"] # "Least Ranked Noise",, "Top Ranked Benign", "Least Ranked Benign"],
+
+    # )    
+    # draw_infl_ranks_variations(
+    #     csv="./data/qwen/infl_layer_ranks-median.csv",
+    #     out_file="./data/qwen/infl-rank-variations-median.pdf",
+    #     # sample_types = ["top_noise", "avg_noise_median", "least_benign", "avg_benign_median"],
+    #     # sample_type_names = ["Highest Noise", "Avg Noise", "Lowest Benign", "Avg Benign"],
+    #     sample_types = ["avg_benign_mean", "avg_noise_mean", "top_noise" ],# "least_noise", , "top_benign", "least_benign"],
+    #     sample_type_names = [ "Avg Benign", "Avg Noise Rank", "Top Ranked Noise Sample"] # "Least Ranked Noise",, "Top Ranked Benign", "Least Ranked Benign"],
+
+    # )    
+    # pass
 
     # auc_recall_metric_graphs(
     #     metrics=[
@@ -4697,7 +4819,7 @@ if __name__ == "__main__":
     #     metric_names=[
     #         "Sentence AUC vs Layer, \\%", "Math AUC vs Layer, \\%", "Math w. Reason AUC vs Layer, \\%"
     #     ],
-    #     methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
+    #     methods=['hf','cos','datainf','outlier','kr-ekfac'],
     #     method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", 'RepSim'],
     #     metric='auc',
     #     modules=['A q', 'B q', 'A v', 'B v'],
@@ -4715,7 +4837,7 @@ if __name__ == "__main__":
     #     metric_names=[
     #         "Sentence Recall vs Layer, \\%", "Math Recall vs Layer, \\%", "Math w. Reason Recall vs Layer, \\%"
     #     ],
-    #     methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
+    #     methods=['hf','cos','datainf','outlier','kr-ekfac'],
     #     method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", 'RepSim'],
     #     metric='recall',
     #     modules=['A q', 'B q', 'A v', 'B v'],
@@ -4742,7 +4864,7 @@ if __name__ == "__main__":
     #     metric_names=[
     #         "Sentence AUC vs Layer, \\%", "Math AUC vs Layer, \\%", "Math w. Reason AUC vs Layer, \\%"
     #     ],
-    #     methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
+    #     methods=['hf','cos','datainf','outlier','kr-ekfac'],
     #     method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
     #     metric='auc',
     #     modules=['A q', 'B q', 'A v', 'B v'],
@@ -4762,7 +4884,7 @@ if __name__ == "__main__":
     #     metric_names=[
     #         "Sentence Recall vs Layer, \\%", "Math Recall vs Layer, \\%", "Math w. Reason Recall vs Layer, \\%"
     #     ],
-    #     methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
+    #     methods=['hf','cos','datainf','outlier','kr-ekfac'],
     #     method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
     #     metric='recall',
     #     modules=['A q', 'B q', 'A v', 'B v'],
@@ -4775,41 +4897,41 @@ if __name__ == "__main__":
 
     # auc_recall_metric_graphs(
     #     metrics=[
-    #         "./data/mistral/ds/metrics_sentense.csv",
-    #         "./data/mistral/ds/metrics_math.csv",
-    #         "./data/mistral/ds/metrics_mathR.csv"
+    #         "./data/mistral/ds-0/metrics_sentense.csv",
+    #         "./data/mistral/ds-0/metrics_math.csv",
+    #         "./data/mistral/ds-0/metrics_mathR.csv"
     #     ],
     #     metric_names=[
     #         "Sentence AUC vs Layer, \\%", "Math AUC vs Layer, \\%", "Math w. Reason AUC vs Layer, \\%"
     #     ],
-    #     methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
+    #     methods=['hf','cos','datainf','outlier','kr-ekfac'],
     #     method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
     #     metric='auc',
     #     modules=['A q', 'B q', 'A v', 'B v'],
     #     module_names=["Query A", "Query B", "Value A", "Value B"],
     #     y_title="Layer-wise AUC, \\%",
     #     figsize=(8, 7),
-    #     out_dir="./data/mistral/ds"
+    #     out_dir="./data/mistral/ds-0"
     # )
     # pass
 
     # auc_recall_metric_graphs(
     #     metrics=[
-    #         "./data/mistral/ds/metrics_sentense.csv",
-    #         "./data/mistral/ds/metrics_math.csv",
-    #         "./data/mistral/ds/metrics_mathR.csv"
+    #         "./data/mistral/ds-0/metrics_sentense.csv",
+    #         "./data/mistral/ds-0/metrics_math.csv",
+    #         "./data/mistral/ds-0/metrics_mathR.csv"
     #     ],
     #     metric_names=[
     #         "Sentence Recall vs Layer, \\%", "Math Recall vs Layer, \\%", "Math w. Reason Recall vs Layer, \\%"
     #     ],
-    #     methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
+    #     methods=['hf','cos','datainf','outlier','kr-ekfac'],
     #     method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
     #     metric='recall',
     #     modules=['A q', 'B q', 'A v', 'B v'],
     #     module_names=["Query A", "Query B", "Value A", "Value B"],
     #     y_title="Layer-wise Recall, \\%",
     #     figsize=(8, 7),
-    #     out_dir="./data/mistral/ds"
+    #     out_dir="./data/mistral/ds-0"
     # )
     # pass
     
@@ -4829,7 +4951,8 @@ if __name__ == "__main__":
 
 
     # network = "mistral"
-    network="roberta"
+    # network="roberta"
+    network="llama"
     # network="qwen"
     group_file = "./groups.json"
     base_path = f"data/{network}"
@@ -4909,7 +5032,8 @@ if __name__ == "__main__":
     pass
 
     # run_spearman_total(out_folder=base_path, layers = selected_layers) #, run_ids = [0,1,2,3,4])
-    # create_tun2_agg_metrics_table(out_folder=base_path, res_suffix = res_suffix)
+    create_tun2_agg_metrics_table(out_folder=base_path, res_suffix = res_suffix)
+    pass
 
     # draw_perf_diffs2(out_folder = base_path, layers = selected_layers,
     #                 pvalue = 0.1) # run_ids = [0,1,2,3,4])
