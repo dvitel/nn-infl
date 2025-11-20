@@ -21,8 +21,8 @@ for run_id in {0..9}; do
     echo "Scores $task $run_id"
     HF_TOKEN=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 INFL_SEED=$run_id INFL_CWD=$task_cwd python \
         /home/dvitel.usf/nn-infl/src/exp.py scores --task=$task \
-        --infl-methods=hf,cos,datainf,outlier \
-        --agg-methods=mean,rank-c,vote2-c,rand,denoise \
+        --infl-methods=hf,cos,datainf,outlier,rand,denoise \
+        --agg-methods=mean,rank-c,vote2-c \
         --m-prefix=m_bl --i-prefix=i_bl --s-prefix=s_bl \
         --group-file=../groups.json
 
