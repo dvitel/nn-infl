@@ -1662,6 +1662,24 @@ def create_tun2_agg_metrics_table(metric_name: str = "best_accuracy_1", prec = 1
     metrics_per_ds.columns = idx
     # metrics_per_ds = metrics_per_ds.round(prec)
 
+    stats_data = metrics_per_ds.dropna(axis=1, how='any').to_numpy()
+
+    wilcoxon_res = {}
+    for i in range(len(metrics_per_ds.index)):
+        idx1 = metrics_per_ds.index[i]
+        for j in range(i+1, len(metrics_per_ds.index)):
+            idx2 = metrics_per_ds.index[j]
+            w = sci_stats.wilcoxon(stats_data[i], stats_data[j])
+            wilcoxon_res.setdefault(idx1, {}).setdefault(idx2, w.pvalue)
+            wilcoxon_res.setdefault(idx2, {}).setdefault(idx1, w.pvalue)    
+# wilcoxon_res[('cos', 'vote2-c', 'v-b-9')][('rand', '', '')]
+# np.float64(0.00718320387770815)
+# wilcoxon_res[('cos', 'vote2-c', 'v-b-8')][('rand', '', '')]
+# np.float64(0.008485324711064664)
+# wilcoxon_res[('datainf', 'vote2-c', 'v-b-8')][('rand', '', '')]
+# np.float64(0.4655503950040336)
+    pass
+
     # ranks = metrics_per_ds.round(prec).rank(axis = 0, ascending=False, method="average") # method="dense")
     ranks = metrics_per_ds.rank(axis = 0, ascending=False, method="average") # method="dense")
 
@@ -1686,7 +1704,24 @@ def create_tun2_agg_metrics_table(metric_name: str = "best_accuracy_1", prec = 1
         metric_by_ds = metric_by_ds.sort_values(by=['rank', 'win_rate', 'wstd'], ascending=[True, False, True])
 
         metric_by_ds = metric_by_ds[["rank", "win_rate", "wstd", *[de for d in datasets for de in [d, d + "_std"]]]]
+    else:
+        metric_by_ds['rank'] = ranks.mean(axis=1).round(1)
+        metric_by_ds['rank_std'] = ranks.std(axis=1).round(1)
+        metric_by_ds = metric_by_ds.sort_values(by=['rank'], ascending=[True])
+        metric_by_ds = metric_by_ds[["rank", "rank_std", *[de for d in datasets for de in [d, d + "_std"]]]]
     # metric_by_ds.to_csv(f"{out_folder}/{metric_name}{suffix}-avg.csv")
+
+    pass
+    a1 = all_df.pivot(index=["infl_method", "agg_method", "module"], columns=["task", "seed"], values=metric_name)
+    wilcoxon_res = {}
+    for i in range(len(a1.index)):
+        for j in range(i+1, len(a1.index)):
+            x = a1.iloc[i].dropna()
+            y = a1.iloc[j].dropna()
+            w = sci_stats.wilcoxon(x, y)
+            wilcoxon_res.setdefault(a1.index[i], {}).setdefault(a1.index[j], w.pvalue)
+            wilcoxon_res.setdefault(a1.index[j], {}).setdefault(a1.index[i], w.pvalue)
+    pass
 
     filtered_df = metric_by_ds.loc[metric_by_ds.index.get_level_values('infl_method') != 'denoise']
     if highlight_max:
@@ -1710,6 +1745,8 @@ def create_tun2_agg_metrics_table(metric_name: str = "best_accuracy_1", prec = 1
         if with_ints:
             new_row["Rank"] = row["rank"]
             new_row["Win Rate"] = f"{row['win_rate']:.2f} {{\\footnotesize $\\pm$ {row['wstd']:.2f}}}"
+        else:
+            new_row["Rank"] = f"{row['rank']:.2f} {{\\footnotesize $\\pm$ {row['rank_std']:.2f}}}"
         for did, d in enumerate(datasets):
             should_highlight = False
             m = round(row[d] * (10 ** prec) * mul) / (10 ** prec)
@@ -4864,7 +4901,7 @@ if __name__ == "__main__":
     #     metric_names=[
     #         "Sentence AUC vs Layer, \\%", "Math AUC vs Layer, \\%", "Math w. Reason AUC vs Layer, \\%"
     #     ],
-    #     methods=['hf','cos','datainf','outlier','kr-ekfac'],
+    #     methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
     #     method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
     #     metric='auc',
     #     modules=['A q', 'B q', 'A v', 'B v'],
@@ -4884,7 +4921,7 @@ if __name__ == "__main__":
     #     metric_names=[
     #         "Sentence Recall vs Layer, \\%", "Math Recall vs Layer, \\%", "Math w. Reason Recall vs Layer, \\%"
     #     ],
-    #     methods=['hf','cos','datainf','outlier','kr-ekfac'],
+    #     methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
     #     method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
     #     metric='recall',
     #     modules=['A q', 'B q', 'A v', 'B v'],
@@ -4904,7 +4941,7 @@ if __name__ == "__main__":
     #     metric_names=[
     #         "Sentence AUC vs Layer, \\%", "Math AUC vs Layer, \\%", "Math w. Reason AUC vs Layer, \\%"
     #     ],
-    #     methods=['hf','cos','datainf','outlier','kr-ekfac'],
+    #     methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
     #     method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
     #     metric='auc',
     #     modules=['A q', 'B q', 'A v', 'B v'],
@@ -4924,7 +4961,7 @@ if __name__ == "__main__":
     #     metric_names=[
     #         "Sentence Recall vs Layer, \\%", "Math Recall vs Layer, \\%", "Math w. Reason Recall vs Layer, \\%"
     #     ],
-    #     methods=['hf','cos','datainf','outlier','kr-ekfac'],
+    #     methods=['hf','cos','datainf','outlier','kr-ekfac', 'repsim'],
     #     method_names=["TracIn", "Cosine", "DataInf", "Outlier Gradient", "EKFAC", "RepSim"],
     #     metric='recall',
     #     modules=['A q', 'B q', 'A v', 'B v'],
@@ -4952,8 +4989,8 @@ if __name__ == "__main__":
 
     # network = "mistral"
     # network="roberta"
-    network="llama"
-    # network="qwen"
+    # network="llama"
+    network="qwen"
     group_file = "./groups.json"
     base_path = f"data/{network}"
     selected_layers = network_layers[network]
@@ -5032,7 +5069,8 @@ if __name__ == "__main__":
     pass
 
     # run_spearman_total(out_folder=base_path, layers = selected_layers) #, run_ids = [0,1,2,3,4])
-    create_tun2_agg_metrics_table(out_folder=base_path, res_suffix = res_suffix)
+    # create_tun2_agg_metrics_table(out_folder=base_path, res_suffix = res_suffix, ds_ranks=True, mul=1, highlight_max=False)
+    # run_wilcoxon_tests()
     pass
 
     # draw_perf_diffs2(out_folder = base_path, layers = selected_layers,
@@ -5044,7 +5082,7 @@ if __name__ == "__main__":
     # pass
 
     # run_friedman_tests(metric_name="best_accuracy_1", out_folder=base_path)
-    # pass 
+    pass 
 
     # run_wilcoxon_tests(metric_name="best_accuracy_1", out_folder=base_path)
     # pass 
@@ -5064,12 +5102,12 @@ if __name__ == "__main__":
     # agg_method_names = ['cset-c']
     dss = ["mrpc", "qnli", "sst2", "qqp", "cola", "mnli", "rte", "stsb"]
 
-    process_ndr_table(base_path, tasks=dss, with_row_id=False, custom_suffix = "-agga", 
-                      best_group_by=["infl", "agg"], 
-                    #   layers=selected_layers, 
-                      ndr_prefix="ndr_agga",
-                    #   agg_method_names=agg_method_names
-                      )
+    # process_ndr_table(base_path, tasks=dss, with_row_id=False, custom_suffix = "-agga", 
+    #                   best_group_by=["infl", "agg"], 
+    #                 #   layers=selected_layers, 
+    #                   ndr_prefix="ndr_agga",
+    #                 #   agg_method_names=agg_method_names
+    #                   )
     pass 
 
     draw_vote_k_ndr(
@@ -5083,9 +5121,9 @@ if __name__ == "__main__":
             # "value A",
             # "query A",
             'self_attn v_proj B',
-            'self_attn q_proj B', 
-            'self_attn v_proj A',
-            'self_attn q_proj A', 
+            # 'self_attn q_proj B', 
+            # 'self_attn v_proj A',
+            # 'self_attn q_proj A', 
         ],
         module_names = [
             "Value B",
@@ -5095,7 +5133,7 @@ if __name__ == "__main__":
         ],
         metric_name = 30, 
         ndr_prefix = "ndr_vote_k", 
-        custom_suffix = "vote_k",
+        custom_suffix = "vote_k-short",
         agg_methods=[
             "vote2-c-10",
             "vote2-c-20",

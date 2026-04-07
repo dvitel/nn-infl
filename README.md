@@ -1,5 +1,7 @@
 # First is Not Really Better Than Last: Evaluating Layer Choice and Aggregation Strategies in Language Model Data Influence Estimation
 
+**Paper:** [https://openreview.net/forum?id=Dkgw08Z4sj](https://openreview.net/forum?id=Dkgw08Z4sj)
+
 Experiments on measuring and applying influence estimation of detrimental samples across many layers of LLMs.
 The repository also contains the implementation of different influence aggregation methods, including reported Ranking and Voring.
 
@@ -69,3 +71,17 @@ for method_name in "${method_names[@]}"; do
 done
 ```
 
+## Citation 
+
+The methods and code in this repository are described in the following publication:
+
+```bibtex
+@inproceedings{
+vitel2026first,
+title={First is Not Really Better Than Last: Evaluating Layer Choice and Aggregation Strategies in Language Model Data Influence Estimation},
+author={Dmytro Vitel and Anshuman Chhabra},
+booktitle={The Fourteenth International Conference on Learning Representations},
+year={2026},
+url={https://openreview.net/forum?id=Dkgw08Z4sj}
+}
+```
