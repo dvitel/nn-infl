@@ -1,4 +1,4 @@
-# First is Not Really Better Than Last: Evaluating Layer Choice and Aggregation Strategies in Language Model Data Influence Estimation
+# ICLR 2026: First is Not Really Better Than Last: Evaluating Layer Choice and Aggregation Strategies in Language Model Data Influence Estimation
 
 **Paper:** [https://openreview.net/forum?id=Dkgw08Z4sj](https://openreview.net/forum?id=Dkgw08Z4sj)
 
